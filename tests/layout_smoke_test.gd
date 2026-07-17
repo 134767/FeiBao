@@ -247,6 +247,7 @@ func _probe_size(size: Vector2i) -> void:
 		if back_btn != null:
 			var back_rect: Rect2 = back_btn.get_global_rect()
 			_assert_true("layout_%s_module_back_finite" % tag, _is_finite_rect(back_rect))
+			_assert_true("layout_%s_module_back_size_positive" % tag, back_rect.size.x > 0.0 and back_rect.size.y > 0.0)
 			_assert_true("layout_%s_module_back_min_height" % tag, back_btn.custom_minimum_size.y >= 48.0)
 			_assert_true(
 				"layout_%s_module_back_inside" % tag,
@@ -255,10 +256,23 @@ func _probe_size(size: Vector2i) -> void:
 		var title: Label = module.find_child("TitleLabel", true, false) as Label
 		if title != null:
 			var t_rect: Rect2 = title.get_global_rect()
+			_assert_true("layout_%s_module_title_finite" % tag, _is_finite_rect(t_rect))
 			_assert_true(
 				"layout_%s_module_title_inside" % tag,
 				_rect_is_inside(t_rect, module_rect, 2.0)
 			)
+		_assert_eq("layout_%s_module_status" % tag, str(module.call("get_status_text")), "此功能將於後續版本開放")
+		_assert_eq("layout_%s_host_child_module" % tag, int(shell.call("get_screen_host_child_count")), 1)
+		# Return lobby and verify lobby layout still ok
+		module.call("request_back")
+		await _tree.process_frame
+		await _tree.process_frame
+		var lobby_after: Control = shell.call("get_active_screen") as Control
+		_assert_true("layout_%s_back_to_lobby" % tag, lobby_after != null and str(shell.call("get_active_screen_id")) == "lobby")
+		if lobby_after != null:
+			var lr: Rect2 = lobby_after.get_global_rect()
+			_assert_true("layout_%s_lobby_after_finite" % tag, _is_finite_rect(lr))
+			_assert_true("layout_%s_lobby_after_inside" % tag, _rect_is_inside(lr, shell_rect, 2.0))
 
 	host.queue_free()
 	await _tree.process_frame

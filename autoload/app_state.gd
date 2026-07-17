@@ -1,4 +1,5 @@
 ## Minimal application phase + in-memory player name. No disk save.
+## Current screen id is owned by NavigationState only.
 extends Node
 
 enum Phase {
@@ -11,13 +12,11 @@ enum Phase {
 
 var _phase: Phase = Phase.BOOTSTRAP
 var _player_name: String = ""
-var _active_module_id: StringName = &""
 
 
 func _ready() -> void:
 	_phase = Phase.BOOTSTRAP
 	_player_name = ""
-	_active_module_id = &""
 
 
 func get_phase() -> Phase:
@@ -44,22 +43,9 @@ func clear_player_name() -> void:
 	_player_name = ""
 
 
-func set_active_module(module_id: StringName) -> void:
-	_active_module_id = module_id
-
-
-func get_active_module() -> StringName:
-	return _active_module_id
-
-
-func clear_active_module() -> void:
-	_active_module_id = &""
-
-
 func reset() -> void:
 	_phase = Phase.BOOTSTRAP
 	_player_name = ""
-	_active_module_id = &""
 
 
 func phase_name() -> String:

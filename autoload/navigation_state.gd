@@ -1,4 +1,4 @@
-## In-app screen navigation (history stack). Distinct from SceneRouter (top-level SceneTree changes).
+## In-app screen navigation (history stack). Distinct from SceneRouter.
 extends Node
 
 const SCREEN_BOOT: StringName = &"boot"
@@ -42,7 +42,6 @@ func navigate_to(screen_id: StringName, add_to_history: bool = true) -> bool:
 		push_error("NavigationState.navigate_to: unregistered screen id '%s'" % str(screen_id))
 		return false
 	if screen_id == _current:
-		# Do not re-stack history for the active screen.
 		return true
 
 	var previous: StringName = _current
@@ -78,13 +77,25 @@ func go_back() -> bool:
 	return true
 
 
-## Prefer history; if empty and currently on a module, fall back to lobby.
+## History first; else ScreenRegistry back_fallback via replace_with (no history push).
+func go_back_or_fallback() -> bool:
+	if not _history.is_empty():
+		return go_back()
+
+	var fallback: StringName = ScreenRegistry.get_back_fallback(_current)
+	if String(fallback).is_empty():
+		return false
+	if not ScreenRegistry.has_screen(fallback):
+		push_error("NavigationState.go_back_or_fallback: invalid fallback '%s'" % str(fallback))
+		return false
+	if fallback == _current:
+		return false
+	return replace_with(fallback)
+
+
+## Compatibility alias for intermediate call sites.
 func go_back_or_lobby() -> bool:
-	if go_back():
-		return true
-	if ScreenRegistry.is_module_screen(_current):
-		return navigate_to(SCREEN_LOBBY, false)
-	return false
+	return go_back_or_fallback()
 
 
 func get_current_screen() -> StringName:

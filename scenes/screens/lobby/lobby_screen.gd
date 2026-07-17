@@ -1,25 +1,12 @@
-## Lobby shell with six module navigation entries.
+## Lobby shell with registry-driven module navigation.
 extends Control
 
+signal module_requested(screen_id: StringName)
+signal module_navigation_failed(screen_id: StringName)
+## Compatibility alias.
 signal module_selected(module_id: StringName)
 
-const MODULE_IDS: Array[StringName] = [
-	&"adventure",
-	&"character",
-	&"party",
-	&"inventory",
-	&"farm",
-	&"settings",
-]
-
-const MODULE_LABELS: Dictionary = {
-	&"adventure": "冒險",
-	&"character": "角色",
-	&"party": "隊伍",
-	&"inventory": "背包",
-	&"farm": "農場",
-	&"settings": "設定",
-}
+const NAV_FAIL_MSG: String = "暫時無法開啟此功能"
 
 @onready var _greeting_label: Label = %GreetingLabel
 @onready var _status_label: Label = %StatusLabel
@@ -27,11 +14,11 @@ const MODULE_LABELS: Dictionary = {
 
 var _buttons: Dictionary = {}
 var _signals_bound: bool = false
+var _navigate_override: Callable = Callable()
 
 
 func _ready() -> void:
 	AppState.set_phase(AppState.Phase.LOBBY)
-	AppState.clear_active_module()
 	_refresh_greeting()
 	_status_label.text = ""
 	_configure_grid_columns()
@@ -58,7 +45,6 @@ func _configure_grid_columns() -> void:
 	var vp: Viewport = get_viewport()
 	if vp == null:
 		return
-	# Deterministic 2-column portrait grid for all supported widths.
 	_grid.columns = 2
 
 
@@ -77,10 +63,10 @@ func _build_module_buttons() -> void:
 		child.queue_free()
 	_buttons.clear()
 
-	for module_id in MODULE_IDS:
+	for module_id in ScreenRegistry.get_module_ids():
 		var button := Button.new()
 		button.name = "Feature_%s" % str(module_id)
-		button.text = str(MODULE_LABELS.get(module_id, str(module_id)))
+		button.text = ScreenRegistry.get_display_title(module_id)
 		button.custom_minimum_size = Vector2(0, 56)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_on_module_pressed.bind(module_id))
@@ -89,12 +75,29 @@ func _build_module_buttons() -> void:
 	_signals_bound = true
 
 
+func set_navigate_override(callback: Callable) -> void:
+	_navigate_override = callback
+
+
+func clear_navigate_override() -> void:
+	_navigate_override = Callable()
+
+
+func _navigate_to_module(module_id: StringName) -> bool:
+	if _navigate_override.is_valid():
+		return bool(_navigate_override.call(module_id))
+	return NavigationState.navigate_to(module_id, true)
+
+
 func _on_module_pressed(module_id: StringName) -> void:
-	_status_label.text = ""
+	module_requested.emit(module_id)
 	module_selected.emit(module_id)
-	var ok: bool = NavigationState.navigate_to(module_id, true)
-	if not ok:
-		_status_label.text = "無法開啟模組，請稍後再試"
+	var ok: bool = _navigate_to_module(module_id)
+	if ok:
+		_status_label.text = ""
+	else:
+		_status_label.text = NAV_FAIL_MSG
+		module_navigation_failed.emit(module_id)
 		push_error("LobbyScreen: navigate_to module failed: %s" % str(module_id))
 
 
@@ -107,17 +110,16 @@ func get_status_text() -> String:
 
 
 func get_module_ids() -> Array[StringName]:
-	return MODULE_IDS.duplicate()
+	return ScreenRegistry.get_module_ids()
 
 
-## Backward-compatible alias used by existing tests.
 func get_placeholder_ids() -> Array[StringName]:
 	return get_module_ids()
 
 
-func get_module_button(module_id: StringName) -> Button:
-	if _buttons.has(module_id):
-		return _buttons[module_id] as Button
+func get_module_button(screen_id: StringName) -> Button:
+	if _buttons.has(screen_id):
+		return _buttons[screen_id] as Button
 	return null
 
 

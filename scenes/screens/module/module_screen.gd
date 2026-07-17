@@ -2,78 +2,121 @@
 extends Control
 
 signal back_requested
+signal module_activated(screen_id: StringName)
 
-const PLACEHOLDER_BODY: String = "此模組內容將於後續版本開放"
+const STATUS_PLACEHOLDER: String = "此功能將於後續版本開放"
 
 @onready var _title_label: Label = %TitleLabel
-@onready var _description_label: Label = %DescriptionLabel
-@onready var _body_label: Label = %BodyLabel
+@onready var _status_label: Label = %BodyLabel
 @onready var _back_button: Button = %BackButton
 
-var _module_id: StringName = &""
+var _screen_id: StringName = &""
+var _configured: bool = false
+var _ready_done: bool = false
 var _signals_bound: bool = false
+var _activated_emitted: bool = false
 
 
 func _ready() -> void:
+	_ready_done = true
 	_bind_signals()
-	# Default from navigation; GameShell may also call configure_for_screen.
-	configure_for_screen(NavigationState.get_current_screen())
+	AppState.set_phase(AppState.Phase.MODULE)
+	if _configured:
+		_apply_ui()
+		_emit_activated_once()
+	elif ScreenRegistry.is_module(NavigationState.get_current_screen()):
+		configure_screen(NavigationState.get_current_screen())
 
 
 func _bind_signals() -> void:
 	if _signals_bound:
 		return
-	if not _back_button.pressed.is_connected(_on_back_pressed):
+	if _back_button != null and not _back_button.pressed.is_connected(_on_back_pressed):
 		_back_button.pressed.connect(_on_back_pressed)
 	_signals_bound = true
 
 
-func configure_for_screen(screen_id: StringName) -> void:
-	_module_id = screen_id
+## Accepts only Registry module IDs. Safe before or after enter tree.
+func configure_screen(screen_id: StringName) -> bool:
+	if not ScreenRegistry.is_module(screen_id):
+		push_error("ModuleScreen.configure_screen: not a module id '%s'" % str(screen_id))
+		return false
+
+	_screen_id = screen_id
+	_configured = true
+	_activated_emitted = false
 	AppState.set_phase(AppState.Phase.MODULE)
-	AppState.set_active_module(screen_id)
 
-	var title: String = ScreenRegistry.get_title(screen_id)
-	var description: String = ScreenRegistry.get_description(screen_id)
-	if title.is_empty():
-		title = str(screen_id)
-	if description.is_empty():
-		description = "模組入口"
+	if _ready_done:
+		_bind_signals()
+		_apply_ui()
+		_emit_activated_once()
+	return true
 
-	_title_label.text = title
-	_description_label.text = description
-	_body_label.text = PLACEHOLDER_BODY
+
+func _apply_ui() -> void:
+	if _title_label == null or _status_label == null or _back_button == null:
+		return
+	_title_label.text = ScreenRegistry.get_display_title(_screen_id)
+	_status_label.text = STATUS_PLACEHOLDER
 	_back_button.text = "返回"
 
 
+func _emit_activated_once() -> void:
+	if _activated_emitted:
+		return
+	if not _configured:
+		return
+	_activated_emitted = true
+	module_activated.emit(_screen_id)
+
+
 func _on_back_pressed() -> void:
-	back_requested.emit()
-	request_return_to_lobby()
+	request_back()
 
 
-## Back button / programmatic return: history first, then lobby fallback.
-func request_return_to_lobby() -> bool:
-	var ok: bool = NavigationState.go_back_or_lobby()
-	if not ok:
-		push_error("ModuleScreen: failed to return from module '%s'" % str(_module_id))
+func request_back() -> bool:
+	var ok: bool = NavigationState.go_back_or_fallback()
+	if ok:
+		back_requested.emit()
+	else:
+		push_error("ModuleScreen: back failed for '%s'" % str(_screen_id))
 	return ok
 
 
+func get_screen_id() -> StringName:
+	return _screen_id
+
+
+## Compatibility with intermediate tests.
 func get_module_id() -> StringName:
-	return _module_id
+	return _screen_id
 
 
 func get_title_text() -> String:
+	if _title_label == null:
+		return ScreenRegistry.get_display_title(_screen_id)
 	return _title_label.text
 
 
-func get_description_text() -> String:
-	return _description_label.text
+func get_status_text() -> String:
+	if _status_label == null:
+		return STATUS_PLACEHOLDER if _configured else ""
+	return _status_label.text
 
 
 func get_body_text() -> String:
-	return _body_label.text
+	return get_status_text()
 
 
 func get_back_button() -> Button:
 	return _back_button
+
+
+## Compatibility alias.
+func configure_for_screen(screen_id: StringName) -> void:
+	configure_screen(screen_id)
+
+
+func request_return_to_lobby() -> bool:
+	return request_back()

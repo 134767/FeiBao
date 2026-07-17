@@ -295,6 +295,7 @@ func _run_lobby_tests() -> void:
 		btn.emit_signal("pressed")
 	_assert_eq("lobby_adventure_navigates", str(_nav().call("get_current_screen")), "adventure")
 	_assert_eq("lobby_history_has_lobby", int(_nav().call("get_history_size")), 1)
+	_assert_eq("lobby_status_empty_after_nav", str(lobby.call("get_status_text")), "")
 	_assert_true("lobby_no_world_story", lobby.call("contains_text", "世界故事") == false)
 	_assert_true("lobby_no_lower_left_avatar", lobby.call("has_lower_left_avatar") == false)
 

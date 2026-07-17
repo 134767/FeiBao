@@ -28,8 +28,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_back() -> void:
-	# History first; modules fall back to lobby when stack is empty.
-	NavigationState.go_back_or_lobby()
+	NavigationState.go_back_or_fallback()
 
 
 func _apply_theme() -> void:
@@ -71,9 +70,16 @@ func _show_screen(screen_id: StringName) -> void:
 	_clear_host()
 	var control: Control = instance as Control
 	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# Configure before enter tree when supported (ModuleScreen handles both orders).
+	if control.has_method("configure_screen"):
+		var ok: Variant = control.call("configure_screen", screen_id)
+		if ok is bool and ok == false:
+			push_error("GameShell: configure_screen failed for '%s'" % str(screen_id))
+			control.free()
+			return
+
 	_screen_host.add_child(control)
-	if control.has_method("configure_for_screen"):
-		control.call("configure_for_screen", screen_id)
 	_active_screen = control
 	_active_screen_id = screen_id
 
