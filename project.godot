@@ -13,11 +13,23 @@ config_version=5
 config/name="FeiBao"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
+run/main_scene="res://scenes/bootstrap/bootstrap.tscn"
+
+[autoload]
+
+AppState="*res://autoload/app_state.gd"
+SceneRouter="*res://autoload/scene_router.gd"
+GameConfig="*res://autoload/game_config.gd"
 
 [display]
 
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/size/window_width_override=360
+window/size/window_height_override=640
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handheld/orientation=1
 
 [physics]
 

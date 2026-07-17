@@ -1,0 +1,9 @@
+{
+  "app_name": "FeiBao",
+  "app_version": "0.1.0",
+  "design_width": 720,
+  "design_height": 1280,
+  "orientation": "portrait",
+  "data_version": 1,
+  "debug_mode": true
+}
