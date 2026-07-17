@@ -24,7 +24,7 @@ Only ModuleScreen implements `configure_screen`.
 
 ## Back
 
-`ui_cancel` → `NavigationState.go_back_or_fallback()`  
+`ui_cancel` → `NavigationState.go_back_or_fallback()`.
 No `quit()`, no OS exit APIs.
 
 See also: `docs/MODULE_NAVIGATION.md`.
