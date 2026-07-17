@@ -3,16 +3,17 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.2.0** — game shell foundation with Boot → Login → Lobby.
+**Current version: 0.3.0** — module navigation foundation on top of the game shell.
 
-This document describes architecture through the game-shell stage. It does **not** claim production gameplay systems are complete.
+This document does **not** claim production gameplay systems are complete.
 
 ## Version History (high level)
 
 | Version | Milestone |
 |---------|-----------|
 | 0.1.0 (previous) | Architecture foundation, FoundationScreen vertical slice |
-| **0.2.0 (current)** | GameShell, NavigationState, Boot / Login / Lobby |
+| 0.2.0 (previous) | GameShell, NavigationState, Boot / Login / Lobby |
+| **0.3.0 (current)** | Six Lobby module entries → shared ModuleScreen + back/fallback |
 
 ## Clean-room Principles
 
@@ -27,11 +28,11 @@ This document describes architecture through the game-shell stage. It does **not
 | Path | Role |
 |------|------|
 | `autoload/` | Global services (AppState, GameConfig, SceneRouter, NavigationState) |
-| `core/` | Shared constants and ScreenRegistry |
+| `core/` | Shared constants and ScreenRegistry (+ module metadata) |
 | `data/` | JSON configuration |
 | `scenes/bootstrap/` | Application entry |
 | `scenes/shell/` | GameShell + ScreenHost |
-| `scenes/screens/` | Boot, Login, Lobby screens |
+| `scenes/screens/` | Boot, Login, Lobby, Module screens |
 | `scenes/ui/` | Safe-area helpers |
 | `ui/themes/` | Original Theme resources (no external fonts/images) |
 | `tests/` | Native headless smoke tests |
@@ -41,64 +42,47 @@ This document describes architecture through the game-shell stage. It does **not
 
 ### AppState
 
-- Tracks phase: `BOOTSTRAP`, `BOOT`, `LOGIN`, `LOBBY`.
-- Holds **in-memory** player name only (`set_player_name` strips edges).
-- `reset()` returns to `BOOTSTRAP` and clears player name.
-- No disk save, ConfigFile, SQLite, or tokens.
+- Phases: `BOOTSTRAP`, `BOOT`, `LOGIN`, `LOBBY`, `MODULE`.
+- In-memory player name only.
+- Optional `active_module` id while viewing a module frame.
+- No disk save.
 
 ### SceneRouter
 
 - Top-level `SceneTree.change_scene_to_file` helper.
-- Used for future full-scene transitions; **not** for in-shell screen swaps.
-- Safe failure on missing paths.
+- Not used for in-shell module swaps.
 
 ### NavigationState
 
-- In-app screen history and current screen id (`boot` / `login` / `lobby`).
-- `navigate_to`, `replace_with`, `go_back`, `reset`.
-- Validates ids via `ScreenRegistry`.
-- Distinct from SceneRouter (see `docs/GAME_SHELL.md`).
+- In-app screen history and current id.
+- `navigate_to`, `replace_with`, `go_back`, `go_back_or_lobby`, `reset`.
+- Validates ids via ScreenRegistry.
 
 ### GameConfig
 
-- Loads `res://data/game_config.json` with typed validation and defaults.
+- Loads `res://data/game_config.json` (version **0.3.0**).
 
-## Screen Flow (0.2.0)
-
-```text
-project.godot main_scene
-        │
-        ▼
-  Bootstrap
-        │ instantiate once
-        ▼
-  GameShell (SafeArea + ScreenHost)
-        │
-        ├─ BootScreen  --replace--> LoginScreen
-        │
-        └─ LoginScreen --navigate--> LobbyScreen
-                    ▲                  │
-                    └──── go_back ─────┘
-```
-
-## Data Flow
+## Screen Flow (0.3.0)
 
 ```text
-data/game_config.json → GameConfig
-Login name → AppState (memory only)
-NavigationState + ScreenRegistry → GameShell ScreenHost
+Bootstrap → GameShell
+  Boot --replace--> Login --navigate--> Lobby
+                                      │
+                    ┌── adventure ────┤
+                    ├── character ────┤  shared ModuleScreen
+                    ├── party ────────┤  (metadata title/body)
+                    ├── inventory ────┤
+                    ├── farm ─────────┤
+                    └── settings ─────┘
+                                      │
+                         back / ui_cancel / go_back_or_lobby
+                                      ▼
+                                    Lobby
 ```
-
-## Testing Strategy
-
-- Native headless runner: `res://tests/test_runner.gd`
-- Suites: architecture, game shell, layout probes
-- No GUT or other external test addons
 
 ## Explicit Exclusions
 
-- Production gameplay, combat, inventory, farm systems
-- Persistent save / remote accounts / backend
-- Third-party commercial assets
-- APK / reverse-engineered content
-- Android export and signing
+- Real adventure / combat / character progression
+- Inventory items, farm production, party composition
+- Settings persistence, accounts, remote APIs
+- Commercial assets, APK content, signing keys

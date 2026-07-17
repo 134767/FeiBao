@@ -228,6 +228,38 @@ func _probe_size(size: Vector2i) -> void:
 				_rect_is_inside(s_rect, lobby_rect, 2.0)
 			)
 
+	# --- Module screen ---
+	nav.call("navigate_to", &"adventure", true)
+	await _tree.process_frame
+	await _tree.process_frame
+	var module: Control = shell.call("get_active_screen") as Control
+	_assert_true("layout_%s_module_present" % tag, module != null)
+	if module != null:
+		var module_rect: Rect2 = module.get_global_rect()
+		print("[INFO] layout_%s_module_rect=%s" % [tag, str(module_rect)])
+		_assert_true("layout_%s_module_finite" % tag, _is_finite_rect(module_rect))
+		_assert_true("layout_%s_module_size_positive" % tag, module_rect.size.x > 0.0 and module_rect.size.y > 0.0)
+		_assert_true(
+			"layout_%s_module_inside_shell" % tag,
+			_rect_is_inside(module_rect, shell_rect, 2.0)
+		)
+		var back_btn: Button = module.call("get_back_button") as Button
+		if back_btn != null:
+			var back_rect: Rect2 = back_btn.get_global_rect()
+			_assert_true("layout_%s_module_back_finite" % tag, _is_finite_rect(back_rect))
+			_assert_true("layout_%s_module_back_min_height" % tag, back_btn.custom_minimum_size.y >= 48.0)
+			_assert_true(
+				"layout_%s_module_back_inside" % tag,
+				_rect_is_inside(back_rect, module_rect, 2.0)
+			)
+		var title: Label = module.find_child("TitleLabel", true, false) as Label
+		if title != null:
+			var t_rect: Rect2 = title.get_global_rect()
+			_assert_true(
+				"layout_%s_module_title_inside" % tag,
+				_rect_is_inside(t_rect, module_rect, 2.0)
+			)
+
 	host.queue_free()
 	await _tree.process_frame
 

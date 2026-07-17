@@ -28,8 +28,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_back() -> void:
-	# Safe no-op when history is empty (e.g. Login with no stack).
-	NavigationState.go_back()
+	# History first; modules fall back to lobby when stack is empty.
+	NavigationState.go_back_or_lobby()
 
 
 func _apply_theme() -> void:
@@ -72,6 +72,8 @@ func _show_screen(screen_id: StringName) -> void:
 	var control: Control = instance as Control
 	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_screen_host.add_child(control)
+	if control.has_method("configure_for_screen"):
+		control.call("configure_for_screen", screen_id)
 	_active_screen = control
 	_active_screen_id = screen_id
 

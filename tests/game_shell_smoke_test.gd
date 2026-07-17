@@ -288,12 +288,13 @@ func _run_lobby_tests() -> void:
 	_assert_eq("lobby_placeholder_ids_unique", unique.size(), 6)
 	_assert_true("lobby_ids_stable", unique.has(&"adventure") and unique.has(&"settings"))
 
-	var before_screen: String = str(_nav().call("get_current_screen"))
+	_nav().call("reset", &"lobby")
 	var btn: Button = lobby.call("get_placeholder_button", &"adventure")
+	_assert_true("lobby_adventure_button_present", btn != null)
 	if btn != null:
 		btn.emit_signal("pressed")
-	_assert_eq("lobby_placeholder_status", str(lobby.call("get_status_text")), "此功能將於後續版本開放")
-	_assert_eq("lobby_placeholder_no_nav", str(_nav().call("get_current_screen")), before_screen)
+	_assert_eq("lobby_adventure_navigates", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("lobby_history_has_lobby", int(_nav().call("get_history_size")), 1)
 	_assert_true("lobby_no_world_story", lobby.call("contains_text", "世界故事") == false)
 	_assert_true("lobby_no_lower_left_avatar", lobby.call("has_lower_left_avatar") == false)
 

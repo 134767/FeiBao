@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.2.0**
+- **App version:** **0.3.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe` (`godot` on PATH)
 

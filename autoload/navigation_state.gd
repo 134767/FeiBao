@@ -4,6 +4,12 @@ extends Node
 const SCREEN_BOOT: StringName = &"boot"
 const SCREEN_LOGIN: StringName = &"login"
 const SCREEN_LOBBY: StringName = &"lobby"
+const SCREEN_ADVENTURE: StringName = &"adventure"
+const SCREEN_CHARACTER: StringName = &"character"
+const SCREEN_PARTY: StringName = &"party"
+const SCREEN_INVENTORY: StringName = &"inventory"
+const SCREEN_FARM: StringName = &"farm"
+const SCREEN_SETTINGS: StringName = &"settings"
 
 signal screen_changed(current: StringName, previous: StringName)
 
@@ -70,6 +76,15 @@ func go_back() -> bool:
 	_current = _history.pop_back()
 	screen_changed.emit(_current, previous)
 	return true
+
+
+## Prefer history; if empty and currently on a module, fall back to lobby.
+func go_back_or_lobby() -> bool:
+	if go_back():
+		return true
+	if ScreenRegistry.is_module_screen(_current):
+		return navigate_to(SCREEN_LOBBY, false)
+	return false
 
 
 func get_current_screen() -> StringName:

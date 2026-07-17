@@ -6,15 +6,18 @@ enum Phase {
 	BOOT,
 	LOGIN,
 	LOBBY,
+	MODULE,
 }
 
 var _phase: Phase = Phase.BOOTSTRAP
 var _player_name: String = ""
+var _active_module_id: StringName = &""
 
 
 func _ready() -> void:
 	_phase = Phase.BOOTSTRAP
 	_player_name = ""
+	_active_module_id = &""
 
 
 func get_phase() -> Phase:
@@ -41,9 +44,22 @@ func clear_player_name() -> void:
 	_player_name = ""
 
 
+func set_active_module(module_id: StringName) -> void:
+	_active_module_id = module_id
+
+
+func get_active_module() -> StringName:
+	return _active_module_id
+
+
+func clear_active_module() -> void:
+	_active_module_id = &""
+
+
 func reset() -> void:
 	_phase = Phase.BOOTSTRAP
 	_player_name = ""
+	_active_module_id = &""
 
 
 func phase_name() -> String:
@@ -56,5 +72,7 @@ func phase_name() -> String:
 			return "LOGIN"
 		Phase.LOBBY:
 			return "LOBBY"
+		Phase.MODULE:
+			return "MODULE"
 		_:
 			return "UNKNOWN"

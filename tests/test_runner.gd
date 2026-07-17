@@ -16,6 +16,7 @@ func _run_tests() -> void:
 	var suites: PackedStringArray = PackedStringArray([
 		"res://tests/architecture_smoke_test.gd",
 		"res://tests/game_shell_smoke_test.gd",
+		"res://tests/module_navigation_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
