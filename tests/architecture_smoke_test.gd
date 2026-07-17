@@ -1,5 +1,4 @@
-## Architecture foundation smoke assertions (no external test addon).
-## Avoids class_name + autoload identifier compile coupling; resolves singletons via SceneTree root.
+## Architecture smoke assertions (0.2.0). Replaces FoundationScreen checks with GameShell equivalents.
 extends RefCounted
 
 var passed: int = 0
@@ -16,14 +15,14 @@ func run_all() -> void:
 	_assert_true("project_godot_parsable", _project_godot_exists())
 	_assert_true("main_scene_exists", _main_scene_exists())
 	_assert_true("bootstrap_scene_loadable", _bootstrap_scene_loadable())
-	_assert_true("foundation_screen_instantiable", _foundation_screen_instantiable())
+	_assert_true("game_shell_instantiable", _game_shell_instantiable())
 	_assert_true("autoload_app_state_exists", ResourceLoader.exists("res://autoload/app_state.gd"))
 	_assert_true("autoload_scene_router_exists", ResourceLoader.exists("res://autoload/scene_router.gd"))
 	_assert_true("autoload_game_config_exists", ResourceLoader.exists("res://autoload/game_config.gd"))
 	_assert_true("autoload_scripts_parsable", _autoload_scripts_parsable())
 	_assert_true("game_config_json_loadable", _game_config_json_loadable())
 	_assert_eq("app_name_equals_FeiBao", str(_game_config().call("get_app_name")), "FeiBao")
-	_assert_eq("app_version_equals_0_1_0", str(_game_config().call("get_app_version")), "0.1.0")
+	_assert_eq("app_version_equals_0_2_0", str(_game_config().call("get_app_version")), "0.2.0")
 	_assert_eq("design_width_equals_720", int(_game_config().call("get_design_width")), 720)
 	_assert_eq("design_height_equals_1280", int(_game_config().call("get_design_height")), 1280)
 	_assert_eq("orientation_equals_portrait", str(_game_config().call("get_orientation")), "portrait")
@@ -62,8 +61,8 @@ func _bootstrap_scene_loadable() -> bool:
 	return packed != null
 
 
-func _foundation_screen_instantiable() -> bool:
-	var path: String = "res://scenes/ui/foundation_screen.tscn"
+func _game_shell_instantiable() -> bool:
+	var path: String = "res://scenes/shell/game_shell.tscn"
 	if not ResourceLoader.exists(path):
 		return false
 	var packed: PackedScene = load(path) as PackedScene
@@ -81,6 +80,7 @@ func _autoload_scripts_parsable() -> bool:
 		"res://autoload/app_state.gd",
 		"res://autoload/scene_router.gd",
 		"res://autoload/game_config.gd",
+		"res://autoload/navigation_state.gd",
 	])
 	for path in paths:
 		var script: Script = load(path) as Script
@@ -110,12 +110,13 @@ func _app_state_reset_works() -> bool:
 	var state: Node = _app_state()
 	if state == null:
 		return false
-	# Phase enum: BOOTSTRAP=0, FOUNDATION=1
-	state.call("set_phase", 1)
-	if int(state.call("get_phase")) != 1:
+	# Phase enum: BOOTSTRAP=0, BOOT=1, LOGIN=2, LOBBY=3
+	state.call("set_phase", 2)
+	if int(state.call("get_phase")) != 2:
 		return false
+	state.call("set_player_name", "Temp")
 	state.call("reset")
-	return int(state.call("get_phase")) == 0
+	return int(state.call("get_phase")) == 0 and str(state.call("get_player_name")) == ""
 
 
 func _assert_true(test_name: String, condition: bool) -> void:

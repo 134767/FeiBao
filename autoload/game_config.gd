@@ -5,7 +5,7 @@ const CONFIG_PATH: String = "res://data/game_config.json"
 
 const DEFAULTS: Dictionary = {
 	"app_name": "FeiBao",
-	"app_version": "0.1.0",
+	"app_version": "0.2.0",
 	"design_width": 720,
 	"design_height": 1280,
 	"orientation": "portrait",

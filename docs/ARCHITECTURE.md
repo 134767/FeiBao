@@ -2,9 +2,17 @@
 
 ## Project Goal
 
-FeiBao is a mobile-first, portrait-first Godot 4.x application. This foundation establishes a clean, testable project shell so later features can grow without rewriting startup, configuration, routing, or UI layout basics.
+FeiBao is a mobile-first, portrait-first Godot 4.x application.
+**Current version: 0.2.0** — game shell foundation with Boot → Login → Lobby.
 
-This document describes the **architecture foundation only**. It does not claim that production gameplay systems are complete.
+This document describes architecture through the game-shell stage. It does **not** claim production gameplay systems are complete.
+
+## Version History (high level)
+
+| Version | Milestone |
+|---------|-----------|
+| 0.1.0 (previous) | Architecture foundation, FoundationScreen vertical slice |
+| **0.2.0 (current)** | GameShell, NavigationState, Boot / Login / Lobby |
 
 ## Clean-room Principles
 
@@ -18,89 +26,79 @@ This document describes the **architecture foundation only**. It does not claim 
 
 | Path | Role |
 |------|------|
-| `autoload/` | Global services registered in Project Settings |
-| `core/` | Shared constants and non-UI utilities |
-| `data/` | JSON and other data-driven configuration |
-| `scenes/bootstrap/` | Application entry scene and boot flow |
-| `scenes/ui/` | Foundation UI and safe-area helpers |
-| `tests/` | Native headless smoke tests (no external addon) |
+| `autoload/` | Global services (AppState, GameConfig, SceneRouter, NavigationState) |
+| `core/` | Shared constants and ScreenRegistry |
+| `data/` | JSON configuration |
+| `scenes/bootstrap/` | Application entry |
+| `scenes/shell/` | GameShell + ScreenHost |
+| `scenes/screens/` | Boot, Login, Lobby screens |
+| `scenes/ui/` | Safe-area helpers |
+| `ui/themes/` | Original Theme resources (no external fonts/images) |
+| `tests/` | Native headless smoke tests |
 | `docs/` | Architecture and development documentation |
 
 ## Autoload Responsibilities
 
-### AppState (`res://autoload/app_state.gd`)
+### AppState
 
-- Tracks a minimal application phase (`BOOTSTRAP`, `FOUNDATION`).
-- Provides `set_phase()`, `get_phase()`, and `reset()`.
-- Does **not** store formal player save data.
+- Tracks phase: `BOOTSTRAP`, `BOOT`, `LOGIN`, `LOBBY`.
+- Holds **in-memory** player name only (`set_player_name` strips edges).
+- `reset()` returns to `BOOTSTRAP` and clears player name.
+- No disk save, ConfigFile, SQLite, or tokens.
 
-### SceneRouter (`res://autoload/scene_router.gd`)
+### SceneRouter
 
-- Centralizes scene changes via `change_scene(path) -> bool`.
-- Rejects empty paths, missing files, and in-progress duplicate switches.
-- Returns `false` on failure and does not crash the process.
+- Top-level `SceneTree.change_scene_to_file` helper.
+- Used for future full-scene transitions; **not** for in-shell screen swaps.
+- Safe failure on missing paths.
 
-### GameConfig (`res://autoload/game_config.gd`)
+### NavigationState
 
-- Loads `res://data/game_config.json` at startup.
-- Validates required fields and types.
-- Falls back to safe defaults and emits errors when data is missing or invalid.
-- Exposes read-only helpers such as `get_value()` and typed getters.
+- In-app screen history and current screen id (`boot` / `login` / `lobby`).
+- `navigate_to`, `replace_with`, `go_back`, `reset`.
+- Validates ids via `ScreenRegistry`.
+- Distinct from SceneRouter (see `docs/GAME_SHELL.md`).
 
-## Scene Flow
+### GameConfig
+
+- Loads `res://data/game_config.json` with typed validation and defaults.
+
+## Screen Flow (0.2.0)
 
 ```text
 project.godot main_scene
         │
         ▼
-  Bootstrap (Node)
-        │
+  Bootstrap
         │ instantiate once
         ▼
-  FoundationScreen (Control)
+  GameShell (SafeArea + ScreenHost)
         │
-        ├─ SafeAreaContainer
-        ├─ App name / version labels
-        ├─ Runtime info
-        └─ Smoke Test button (UI-only success state)
+        ├─ BootScreen  --replace--> LoginScreen
+        │
+        └─ LoginScreen --navigate--> LobbyScreen
+                    ▲                  │
+                    └──── go_back ─────┘
 ```
-
-1. Godot launches `res://scenes/bootstrap/bootstrap.tscn`.
-2. Bootstrap sets phase to `BOOTSTRAP`, loads FoundationScreen, then sets `FOUNDATION`.
-3. FoundationScreen shows static shell UI; no gameplay systems are started.
 
 ## Data Flow
 
 ```text
-data/game_config.json
-        │
-        ▼
-    GameConfig (autoload)
-        │
-        ├─ validate / merge defaults
-        └─ FoundationScreen / future systems read via getters
+data/game_config.json → GameConfig
+Login name → AppState (memory only)
+NavigationState + ScreenRegistry → GameShell ScreenHost
 ```
-
-Minimum schema keys: `app_name`, `app_version`, `design_width`, `design_height`, `orientation`, `data_version`, `debug_mode`.
-
-## UI & Safe Area
-
-- Design resolution: **720×1280**, orientation **portrait**.
-- UI uses `Control` anchors and containers for narrow screens (e.g. 390×844 class).
-- `SafeAreaContainer` reads `DisplayServer.get_display_safe_area()`, maps insets to the viewport, and uses **zero margins** when safe-area data is unavailable (desktop).
 
 ## Testing Strategy
 
-- Native headless runner: `res://tests/test_runner.gd`.
-- Suite: `res://tests/architecture_smoke_test.gd`.
-- No GUT or other external test addons required.
-- Assertions cover main scene, bootstrap load, foundation instantiation, autoload scripts, config values, SceneRouter safe failure, and AppState reset.
-- Exit code `0` when all pass; non-zero when any fail.
+- Native headless runner: `res://tests/test_runner.gd`
+- Suites: architecture, game shell, layout probes
+- No GUT or other external test addons
 
 ## Explicit Exclusions
 
-- Production gameplay systems
-- Third-party commercial game assets
+- Production gameplay, combat, inventory, farm systems
+- Persistent save / remote accounts / backend
+- Third-party commercial assets
 - APK / reverse-engineered content
-- Android export and signing setup
-- Formal login, economy, combat, map, or building systems
+- Android export and signing
