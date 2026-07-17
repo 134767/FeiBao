@@ -228,6 +228,89 @@ func _probe_size(size: Vector2i) -> void:
 				_rect_is_inside(s_rect, lobby_rect, 2.0)
 			)
 
+	# --- Module screen ---
+	nav.call("navigate_to", &"adventure", true)
+	await _tree.process_frame
+	await _tree.process_frame
+	var module: Control = shell.call("get_active_screen") as Control
+	_assert_true("layout_%s_module_present" % tag, module != null)
+	if module != null:
+		var module_rect: Rect2 = module.get_global_rect()
+		print("[INFO] layout_%s_module_rect=%s" % [tag, str(module_rect)])
+		_assert_true("layout_%s_module_finite" % tag, _is_finite_rect(module_rect))
+		_assert_true("layout_%s_module_size_positive" % tag, module_rect.size.x > 0.0 and module_rect.size.y > 0.0)
+		_assert_true(
+			"layout_%s_module_inside_shell" % tag,
+			_rect_is_inside(module_rect, shell_rect, 2.0)
+		)
+
+		var header: HBoxContainer = module.find_child("HeaderRow", true, false) as HBoxContainer
+		_assert_true("layout_%s_header_present" % tag, header != null)
+		var header_rect := Rect2()
+		if header != null:
+			header_rect = header.get_global_rect()
+			print("[INFO] layout_%s_header_rect=%s" % [tag, str(header_rect)])
+			_assert_true("layout_%s_header_finite" % tag, _is_finite_rect(header_rect))
+			_assert_true("layout_%s_header_size_positive" % tag, header_rect.size.x > 0.0 and header_rect.size.y > 0.0)
+			_assert_true("layout_%s_header_inside_module" % tag, _rect_is_inside(header_rect, module_rect, 2.0))
+			_assert_true(
+				"layout_%s_header_no_h_overflow" % tag,
+				header_rect.end.x <= module_rect.end.x + 2.0 and header_rect.position.x >= module_rect.position.x - 2.0
+			)
+
+		var back_btn: Button = module.call("get_back_button") as Button
+		if back_btn != null:
+			var back_rect: Rect2 = back_btn.get_global_rect()
+			_assert_true("layout_%s_module_back_finite" % tag, _is_finite_rect(back_rect))
+			_assert_true("layout_%s_module_back_size_positive" % tag, back_rect.size.x > 0.0 and back_rect.size.y > 0.0)
+			_assert_true("layout_%s_module_back_min_height" % tag, back_btn.custom_minimum_size.y >= 48.0)
+			_assert_true("layout_%s_module_back_inside" % tag, _rect_is_inside(back_rect, module_rect, 2.0))
+			if header != null:
+				_assert_true("layout_%s_module_back_inside_header" % tag, _rect_is_inside(back_rect, header_rect, 2.0))
+
+		var title: Label = module.find_child("TitleLabel", true, false) as Label
+		if title != null:
+			var t_rect: Rect2 = title.get_global_rect()
+			_assert_true("layout_%s_module_title_finite" % tag, _is_finite_rect(t_rect))
+			_assert_true("layout_%s_module_title_inside" % tag, _rect_is_inside(t_rect, module_rect, 2.0))
+			if header != null:
+				_assert_true("layout_%s_module_title_inside_header" % tag, _rect_is_inside(t_rect, header_rect, 2.0))
+			_assert_true(
+				"layout_%s_module_title_no_h_overflow" % tag,
+				t_rect.end.x <= module_rect.end.x + 2.0
+			)
+
+		var body: Label = module.find_child("BodyLabel", true, false) as Label
+		var body_panel: Control = module.find_child("BodyPanel", true, false) as Control
+		_assert_true("layout_%s_body_present" % tag, body != null)
+		if body != null:
+			var b_rect: Rect2 = body.get_global_rect()
+			print("[INFO] layout_%s_body_rect=%s text=%s" % [tag, str(b_rect), body.text])
+			_assert_true("layout_%s_body_finite" % tag, _is_finite_rect(b_rect))
+			_assert_true("layout_%s_body_size_positive" % tag, b_rect.size.x > 0.0 and b_rect.size.y > 0.0)
+			_assert_true("layout_%s_body_inside_module" % tag, _rect_is_inside(b_rect, module_rect, 2.0))
+			if body_panel != null:
+				var panel_rect: Rect2 = body_panel.get_global_rect()
+				_assert_true("layout_%s_body_inside_panel" % tag, _rect_is_inside(b_rect, panel_rect, 2.0))
+			_assert_true(
+				"layout_%s_body_no_h_overflow" % tag,
+				b_rect.end.x <= module_rect.end.x + 2.0 and b_rect.position.x >= module_rect.position.x - 2.0
+			)
+			_assert_eq("layout_%s_body_autowrap" % tag, int(body.autowrap_mode), 3)
+			_assert_eq("layout_%s_module_status" % tag, body.text, "此功能將於後續版本開放")
+
+		_assert_eq("layout_%s_host_child_module" % tag, int(shell.call("get_screen_host_child_count")), 1)
+		# Return lobby and verify lobby layout still ok
+		module.call("request_back")
+		await _tree.process_frame
+		await _tree.process_frame
+		var lobby_after: Control = shell.call("get_active_screen") as Control
+		_assert_true("layout_%s_back_to_lobby" % tag, lobby_after != null and str(shell.call("get_active_screen_id")) == "lobby")
+		if lobby_after != null:
+			var lr: Rect2 = lobby_after.get_global_rect()
+			_assert_true("layout_%s_lobby_after_finite" % tag, _is_finite_rect(lr))
+			_assert_true("layout_%s_lobby_after_inside" % tag, _rect_is_inside(lr, shell_rect, 2.0))
+
 	host.queue_free()
 	await _tree.process_frame
 

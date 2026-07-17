@@ -28,8 +28,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_back() -> void:
-	# Safe no-op when history is empty (e.g. Login with no stack).
-	NavigationState.go_back()
+	NavigationState.go_back_or_fallback()
 
 
 func _apply_theme() -> void:
@@ -71,6 +70,15 @@ func _show_screen(screen_id: StringName) -> void:
 	_clear_host()
 	var control: Control = instance as Control
 	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# Configure before enter tree when supported (ModuleScreen handles both orders).
+	if control.has_method("configure_screen"):
+		var ok: Variant = control.call("configure_screen", screen_id)
+		if ok is bool and ok == false:
+			push_error("GameShell: configure_screen failed for '%s'" % str(screen_id))
+			control.free()
+			return
+
 	_screen_host.add_child(control)
 	_active_screen = control
 	_active_screen_id = screen_id

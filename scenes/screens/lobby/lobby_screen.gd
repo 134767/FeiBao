@@ -1,27 +1,12 @@
-## Lobby shell with six non-functional module placeholders.
+## Lobby shell with registry-driven module navigation.
 extends Control
 
-signal placeholder_selected(feature_id: StringName)
+signal module_requested(screen_id: StringName)
+signal module_navigation_failed(screen_id: StringName)
+## Compatibility alias.
+signal module_selected(module_id: StringName)
 
-const PLACEHOLDER_IDS: Array[StringName] = [
-	&"adventure",
-	&"character",
-	&"party",
-	&"inventory",
-	&"farm",
-	&"settings",
-]
-
-const PLACEHOLDER_LABELS: Dictionary = {
-	&"adventure": "冒險",
-	&"character": "角色",
-	&"party": "隊伍",
-	&"inventory": "背包",
-	&"farm": "農場",
-	&"settings": "設定",
-}
-
-const STATUS_PLACEHOLDER: String = "此功能將於後續版本開放"
+const NAV_FAIL_MSG: String = "暫時無法開啟此功能"
 
 @onready var _greeting_label: Label = %GreetingLabel
 @onready var _status_label: Label = %StatusLabel
@@ -29,6 +14,7 @@ const STATUS_PLACEHOLDER: String = "此功能將於後續版本開放"
 
 var _buttons: Dictionary = {}
 var _signals_bound: bool = false
+var _navigate_override: Callable = Callable()
 
 
 func _ready() -> void:
@@ -36,7 +22,7 @@ func _ready() -> void:
 	_refresh_greeting()
 	_status_label.text = ""
 	_configure_grid_columns()
-	_build_placeholders()
+	_build_module_buttons()
 	if not get_viewport().size_changed.is_connected(_on_viewport_resized):
 		get_viewport().size_changed.connect(_on_viewport_resized)
 
@@ -59,12 +45,7 @@ func _configure_grid_columns() -> void:
 	var vp: Viewport = get_viewport()
 	if vp == null:
 		return
-	# Narrow portrait: 2 columns. Design width 720 may use 2 or 3 — fixed 2 for determinism.
-	var width: float = vp.get_visible_rect().size.x
-	if width >= 700.0:
-		_grid.columns = 2
-	else:
-		_grid.columns = 2
+	_grid.columns = 2
 
 
 func _refresh_greeting() -> void:
@@ -74,7 +55,7 @@ func _refresh_greeting() -> void:
 	_greeting_label.text = "歡迎，%s" % name_text
 
 
-func _build_placeholders() -> void:
+func _build_module_buttons() -> void:
 	if _signals_bound:
 		return
 	for child in _grid.get_children():
@@ -82,22 +63,42 @@ func _build_placeholders() -> void:
 		child.queue_free()
 	_buttons.clear()
 
-	for feature_id in PLACEHOLDER_IDS:
+	for module_id in ScreenRegistry.get_module_ids():
 		var button := Button.new()
-		button.name = "Feature_%s" % str(feature_id)
-		button.text = str(PLACEHOLDER_LABELS.get(feature_id, str(feature_id)))
+		button.name = "Feature_%s" % str(module_id)
+		button.text = ScreenRegistry.get_display_title(module_id)
 		button.custom_minimum_size = Vector2(0, 56)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.pressed.connect(_on_placeholder_pressed.bind(feature_id))
+		button.pressed.connect(_on_module_pressed.bind(module_id))
 		_grid.add_child(button)
-		_buttons[feature_id] = button
+		_buttons[module_id] = button
 	_signals_bound = true
 
 
-func _on_placeholder_pressed(feature_id: StringName) -> void:
-	_status_label.text = STATUS_PLACEHOLDER
-	placeholder_selected.emit(feature_id)
-	# Do not navigate — modules do not exist yet.
+func set_navigate_override(callback: Callable) -> void:
+	_navigate_override = callback
+
+
+func clear_navigate_override() -> void:
+	_navigate_override = Callable()
+
+
+func _navigate_to_module(module_id: StringName) -> bool:
+	if _navigate_override.is_valid():
+		return bool(_navigate_override.call(module_id))
+	return NavigationState.navigate_to(module_id, true)
+
+
+func _on_module_pressed(module_id: StringName) -> void:
+	module_requested.emit(module_id)
+	module_selected.emit(module_id)
+	var ok: bool = _navigate_to_module(module_id)
+	if ok:
+		_status_label.text = ""
+	else:
+		_status_label.text = NAV_FAIL_MSG
+		module_navigation_failed.emit(module_id)
+		push_error("LobbyScreen: navigate_to module failed: %s" % str(module_id))
 
 
 func get_greeting_text() -> String:
@@ -108,14 +109,22 @@ func get_status_text() -> String:
 	return _status_label.text
 
 
+func get_module_ids() -> Array[StringName]:
+	return ScreenRegistry.get_module_ids()
+
+
 func get_placeholder_ids() -> Array[StringName]:
-	return PLACEHOLDER_IDS.duplicate()
+	return get_module_ids()
+
+
+func get_module_button(screen_id: StringName) -> Button:
+	if _buttons.has(screen_id):
+		return _buttons[screen_id] as Button
+	return null
 
 
 func get_placeholder_button(feature_id: StringName) -> Button:
-	if _buttons.has(feature_id):
-		return _buttons[feature_id] as Button
-	return null
+	return get_module_button(feature_id)
 
 
 func contains_text(needle: String) -> bool:
@@ -134,5 +143,4 @@ func _tree_contains_text(node: Node, needle: String) -> bool:
 
 
 func has_lower_left_avatar() -> bool:
-	# Explicitly no avatar control in this foundation.
 	return has_node("LowerLeftAvatar") or has_node("%LowerLeftAvatar")

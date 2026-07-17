@@ -1,4 +1,5 @@
 ## Minimal application phase + in-memory player name. No disk save.
+## Current screen id is owned by NavigationState only.
 extends Node
 
 enum Phase {
@@ -6,6 +7,7 @@ enum Phase {
 	BOOT,
 	LOGIN,
 	LOBBY,
+	MODULE,
 }
 
 var _phase: Phase = Phase.BOOTSTRAP
@@ -56,5 +58,7 @@ func phase_name() -> String:
 			return "LOGIN"
 		Phase.LOBBY:
 			return "LOBBY"
+		Phase.MODULE:
+			return "MODULE"
 		_:
 			return "UNKNOWN"

@@ -9,13 +9,14 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (0.2.0) ===")
+	print("=== FeiBao Test Runner (0.3.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
 
 	var suites: PackedStringArray = PackedStringArray([
 		"res://tests/architecture_smoke_test.gd",
 		"res://tests/game_shell_smoke_test.gd",
+		"res://tests/module_navigation_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
