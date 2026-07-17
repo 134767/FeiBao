@@ -137,13 +137,16 @@ func _run_module_screen_tests() -> void:
 		_assert_eq("module_title_after_%s" % str(mid), str(module.call("get_title_text")), ScreenRegistry.get_display_title(mid))
 		_assert_eq("module_status_after_%s" % str(mid), str(module.call("get_status_text")), "此功能將於後續版本開放")
 		_assert_eq("module_phase_after_%s" % str(mid), int(_app().call("get_phase")), 4)
-		_assert_true("module_no_desc_label_%s" % str(mid), module.call("has_description_label") == false)
-		_assert_true("module_no_text_說明_%s" % str(mid), module.call("contains_visible_text", "說明") == false)
-		_assert_true("module_no_世界故事_%s" % str(mid), module.call("contains_visible_text", "世界故事") == false)
-		_assert_true("module_no_關卡_%s" % str(mid), module.call("contains_visible_text", "關卡") == false)
-		_assert_true("module_no_戰鬥_%s" % str(mid), module.call("contains_visible_text", "戰鬥") == false)
-		_assert_true("module_no_物品_%s" % str(mid), module.call("contains_visible_text", "物品") == false)
-		_assert_eq("module_button_count_%s" % str(mid), int(module.call("count_buttons")), 1)
+		_assert_true(
+			"module_no_desc_label_%s" % str(mid),
+			module.find_child("DescriptionLabel", true, false) == null
+		)
+		_assert_true("module_no_text_說明_%s" % str(mid), _tree_contains_visible_text(module, "說明") == false)
+		_assert_true("module_no_世界故事_%s" % str(mid), _tree_contains_visible_text(module, "世界故事") == false)
+		_assert_true("module_no_關卡_%s" % str(mid), _tree_contains_visible_text(module, "關卡") == false)
+		_assert_true("module_no_戰鬥_%s" % str(mid), _tree_contains_visible_text(module, "戰鬥") == false)
+		_assert_true("module_no_物品_%s" % str(mid), _tree_contains_visible_text(module, "物品") == false)
+		_assert_eq("module_button_count_%s" % str(mid), _count_buttons(module), 1)
 		var back: Button = module.call("get_back_button") as Button
 		_assert_true("module_back_exists_%s" % str(mid), back != null)
 		_assert_eq("module_back_text_%s" % str(mid), back.text, "返回")
@@ -372,6 +375,28 @@ func _cleanup_shell() -> void:
 	if _shell != null and is_instance_valid(_shell):
 		_shell.queue_free()
 		_shell = null
+
+
+func _tree_contains_visible_text(node: Node, needle: String) -> bool:
+	if node is CanvasItem and not (node as CanvasItem).visible:
+		return false
+	if node is Label and needle in (node as Label).text:
+		return true
+	if node is Button and needle in (node as Button).text:
+		return true
+	for child in node.get_children():
+		if _tree_contains_visible_text(child, needle):
+			return true
+	return false
+
+
+func _count_buttons(node: Node) -> int:
+	var total: int = 0
+	if node is Button:
+		total += 1
+	for child in node.get_children():
+		total += _count_buttons(child)
+	return total
 
 
 func _assert_true(test_name: String, condition: bool) -> void:
