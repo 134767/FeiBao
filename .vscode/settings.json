@@ -1,0 +1,9 @@
+{
+  "files.exclude": {
+    "**/.godot": true
+  },
+  "files.watcherExclude": {
+    "**/.godot/**": true
+  },
+  "editor.formatOnSave": true
+}
