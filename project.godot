@@ -20,6 +20,7 @@ run/main_scene="res://scenes/bootstrap/bootstrap.tscn"
 AppState="*res://autoload/app_state.gd"
 SceneRouter="*res://autoload/scene_router.gd"
 GameConfig="*res://autoload/game_config.gd"
+NavigationState="*res://autoload/navigation_state.gd"
 
 [display]
 
