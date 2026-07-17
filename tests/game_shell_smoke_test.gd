@@ -134,7 +134,6 @@ func _run_login_tests() -> void:
 	var packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
 	var login: Control = packed.instantiate() as Control
 	_tree.root.add_child(login)
-	# Ensure _ready ran
 	_assert_true("login_has_start_button", login.call("get_start_button") != null)
 	_assert_eq("login_primary_button_count", int(login.call("count_primary_buttons")), 1)
 	_assert_eq("login_start_button_text", str((login.call("get_start_button") as Button).text), "開始遊戲")
@@ -175,9 +174,102 @@ func _run_login_tests() -> void:
 	_assert_eq("login_fail_no_name_write", str(_app().call("get_player_name")), "")
 	_assert_true("login_fail_has_message", not str(login.call("get_validation_message")).is_empty())
 
-	# Enter and button share submit_player_name — already covered by using submit_player_name for both paths.
-	_assert_true("login_enter_and_button_same_submit", true)
+	login.queue_free()
 
+	_run_login_button_signal_path()
+	_run_login_enter_signal_path()
+	_run_login_navigation_failure_rollback()
+
+
+func _run_login_button_signal_path() -> void:
+	var packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
+	var login: Control = packed.instantiate() as Control
+	_tree.root.add_child(login)
+
+	_app().call("clear_player_name")
+	_nav().call("reset", &"login")
+
+	var signal_count: Array = [0]
+	var signal_name: Array = [""]
+	login.login_succeeded.connect(func(n: String) -> void:
+		signal_count[0] = int(signal_count[0]) + 1
+		signal_name[0] = n
+	)
+
+	var name_input: LineEdit = login.call("get_name_input") as LineEdit
+	var start_button: Button = login.call("get_start_button") as Button
+	name_input.text = "  BtnUser  "
+	start_button.emit_signal("pressed")
+
+	_assert_eq("login_button_signal_app_name", str(_app().call("get_player_name")), "BtnUser")
+	_assert_eq("login_button_signal_nav_lobby", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("login_button_signal_count", int(signal_count[0]), 1)
+	_assert_eq("login_button_signal_value", str(signal_name[0]), "BtnUser")
+	print("[INFO] login_button_signal_path exercised via start_button.pressed")
+
+	login.queue_free()
+
+
+func _run_login_enter_signal_path() -> void:
+	var packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
+	var login: Control = packed.instantiate() as Control
+	_tree.root.add_child(login)
+
+	_app().call("clear_player_name")
+	_nav().call("reset", &"login")
+
+	var signal_count: Array = [0]
+	var signal_name: Array = [""]
+	login.login_succeeded.connect(func(n: String) -> void:
+		signal_count[0] = int(signal_count[0]) + 1
+		signal_name[0] = n
+	)
+
+	var name_input: LineEdit = login.call("get_name_input") as LineEdit
+	name_input.emit_signal("text_submitted", "  EnterUser  ")
+
+	_assert_eq("login_enter_signal_app_name", str(_app().call("get_player_name")), "EnterUser")
+	_assert_eq("login_enter_signal_nav_lobby", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("login_enter_signal_count", int(signal_count[0]), 1)
+	_assert_eq("login_enter_signal_value", str(signal_name[0]), "EnterUser")
+	print("[INFO] login_enter_signal_path exercised via name_input.text_submitted")
+
+	login.queue_free()
+
+
+func _run_login_navigation_failure_rollback() -> void:
+	var packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
+	var login: Control = packed.instantiate() as Control
+	_tree.root.add_child(login)
+
+	_app().call("set_player_name", "Previous")
+	_nav().call("reset", &"login")
+	var hist_before: int = int(_nav().call("get_history_size"))
+	var current_before: String = str(_nav().call("get_current_screen"))
+
+	var signal_count: Array = [0]
+	login.login_succeeded.connect(func(_n: String) -> void:
+		signal_count[0] = int(signal_count[0]) + 1
+	)
+
+	login.call("set_navigate_to_lobby_override", func() -> bool:
+		return false
+	)
+
+	var ok: bool = bool(login.call("submit_player_name", "  FailUser  "))
+	_assert_true("login_nav_fail_returns_false", ok == false)
+	_assert_eq("login_nav_fail_name_rollback", str(_app().call("get_player_name")), "Previous")
+	_assert_eq("login_nav_fail_signal_count", int(signal_count[0]), 0)
+	_assert_eq("login_nav_fail_current_unchanged", str(_nav().call("get_current_screen")), current_before)
+	_assert_eq("login_nav_fail_history_unchanged", int(_nav().call("get_history_size")), hist_before)
+	_assert_eq(
+		"login_nav_fail_message",
+		str(login.call("get_validation_message")),
+		"暫時無法開始遊戲，請再試一次"
+	)
+	print("[INFO] login_navigation_failure_rollback exercised via navigate override")
+
+	login.call("clear_navigate_to_lobby_override")
 	login.queue_free()
 
 

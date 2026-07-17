@@ -5,6 +5,7 @@ signal login_succeeded(player_name: String)
 
 const MIN_LEN: int = 1
 const MAX_LEN: int = 12
+const INTERNAL_NAV_FAIL_MSG: String = "暫時無法開始遊戲，請再試一次"
 
 @onready var _title_label: Label = %TitleLabel
 @onready var _name_input: LineEdit = %NameInput
@@ -12,6 +13,8 @@ const MAX_LEN: int = 12
 @onready var _validation_label: Label = %ValidationLabel
 
 var _signals_bound: bool = false
+## Optional test hook: when valid, replaces NavigationState.navigate_to for lobby.
+var _navigate_to_lobby_override: Callable = Callable()
 
 
 func _ready() -> void:
@@ -70,6 +73,21 @@ func validate_player_name(value: String) -> Dictionary:
 	}
 
 
+## Overridable navigation step (tests may inject failure via set_navigate_to_lobby_override).
+func _navigate_to_lobby() -> bool:
+	if _navigate_to_lobby_override.is_valid():
+		return bool(_navigate_to_lobby_override.call())
+	return NavigationState.navigate_to(NavigationState.SCREEN_LOBBY, true)
+
+
+func set_navigate_to_lobby_override(callback: Callable) -> void:
+	_navigate_to_lobby_override = callback
+
+
+func clear_navigate_to_lobby_override() -> void:
+	_navigate_to_lobby_override = Callable()
+
+
 func submit_player_name(value: String) -> bool:
 	var result: Dictionary = validate_player_name(value)
 	if not bool(result["valid"]):
@@ -77,14 +95,21 @@ func submit_player_name(value: String) -> bool:
 		return false
 
 	var normalized: String = str(result["normalized"])
+	var previous_name: String = AppState.get_player_name()
+
+	# Name must exist before Lobby instantiates (greeting reads AppState).
 	AppState.set_player_name(normalized)
 	AppState.set_phase(AppState.Phase.LOGIN)
-	_validation_label.text = ""
-	login_succeeded.emit(normalized)
-	var ok: bool = NavigationState.navigate_to(NavigationState.SCREEN_LOBBY, true)
+
+	var ok: bool = _navigate_to_lobby()
 	if not ok:
+		AppState.set_player_name(previous_name)
+		_validation_label.text = INTERNAL_NAV_FAIL_MSG
 		push_error("LoginScreen: navigate_to lobby failed")
 		return false
+
+	_validation_label.text = ""
+	login_succeeded.emit(normalized)
 	return true
 
 

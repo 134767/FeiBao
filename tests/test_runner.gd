@@ -32,7 +32,8 @@ func _run_tests() -> void:
 			total_failed += 1
 			continue
 		suite.call("setup", self)
-		suite.call("run_all")
+		# Await so suites that use process_frame can complete layout.
+		await suite.run_all()
 		total_passed += int(suite.get("passed"))
 		total_failed += int(suite.get("failed"))
 
