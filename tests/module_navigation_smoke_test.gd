@@ -128,7 +128,7 @@ func _run_navigation_tests() -> void:
 func _run_module_screen_tests() -> void:
 	var packed: PackedScene = load("res://scenes/screens/module/module_screen.tscn") as PackedScene
 
-	# configure after tree
+	# Content contract for all six modules
 	for mid in ScreenRegistry.get_module_ids():
 		var module: Control = packed.instantiate() as Control
 		_tree.root.add_child(module)
@@ -137,27 +137,70 @@ func _run_module_screen_tests() -> void:
 		_assert_eq("module_title_after_%s" % str(mid), str(module.call("get_title_text")), ScreenRegistry.get_display_title(mid))
 		_assert_eq("module_status_after_%s" % str(mid), str(module.call("get_status_text")), "此功能將於後續版本開放")
 		_assert_eq("module_phase_after_%s" % str(mid), int(_app().call("get_phase")), 4)
+		_assert_true("module_no_desc_label_%s" % str(mid), module.call("has_description_label") == false)
+		_assert_true("module_no_text_說明_%s" % str(mid), module.call("contains_visible_text", "說明") == false)
+		_assert_true("module_no_世界故事_%s" % str(mid), module.call("contains_visible_text", "世界故事") == false)
+		_assert_true("module_no_關卡_%s" % str(mid), module.call("contains_visible_text", "關卡") == false)
+		_assert_true("module_no_戰鬥_%s" % str(mid), module.call("contains_visible_text", "戰鬥") == false)
+		_assert_true("module_no_物品_%s" % str(mid), module.call("contains_visible_text", "物品") == false)
+		_assert_eq("module_button_count_%s" % str(mid), int(module.call("count_buttons")), 1)
 		var back: Button = module.call("get_back_button") as Button
 		_assert_true("module_back_exists_%s" % str(mid), back != null)
+		_assert_eq("module_back_text_%s" % str(mid), back.text, "返回")
 		_assert_true("module_back_height_%s" % str(mid), back.custom_minimum_size.y >= 48.0)
 		module.queue_free()
 
-	# configure before tree
+	# module_activated after tree
+	var after: Control = packed.instantiate() as Control
+	_tree.root.add_child(after)
+	var after_count: Array = [0]
+	var after_id: Array = [""]
+	after.module_activated.connect(func(sid: StringName) -> void:
+		after_count[0] = int(after_count[0]) + 1
+		after_id[0] = str(sid)
+	)
+	_assert_true("activated_after_cfg_ok", after.call("configure_screen", &"adventure") == true)
+	_assert_eq("activated_after_tree_count", int(after_count[0]), 1)
+	_assert_eq("activated_after_tree_id", str(after_id[0]), "adventure")
+	_assert_eq("activated_after_phase", int(_app().call("get_phase")), 4)
+	_assert_eq("activated_after_title", str(after.call("get_title_text")), "冒險")
+	print("[INFO] module_activated after tree: count=1 id=adventure")
+	after.queue_free()
+
+	# module_activated before tree (connect before add_child, after configure)
 	var pre: Control = packed.instantiate() as Control
 	_assert_true("module_cfg_before_tree", pre.call("configure_screen", &"party") == true)
+	var before_count: Array = [0]
+	var before_id: Array = [""]
+	pre.module_activated.connect(func(sid: StringName) -> void:
+		before_count[0] = int(before_count[0]) + 1
+		before_id[0] = str(sid)
+	)
 	_tree.root.add_child(pre)
+	_assert_eq("activated_before_tree_count", int(before_count[0]), 1)
+	_assert_eq("activated_before_tree_id", str(before_id[0]), "party")
 	_assert_eq("module_id_before_tree", str(pre.call("get_screen_id")), "party")
 	_assert_eq("module_title_before_tree", str(pre.call("get_title_text")), "隊伍")
 	_assert_eq("module_status_before_tree", str(pre.call("get_status_text")), "此功能將於後續版本開放")
+	print("[INFO] module_activated before tree: count=1 id=party")
 	pre.queue_free()
 
-	# invalid IDs
+	# invalid IDs: no activation, id unchanged (nav not on module to avoid auto-configure in _ready)
+	_nav().call("reset", &"login")
 	var inv: Control = packed.instantiate() as Control
 	_tree.root.add_child(inv)
+	var inv_count: Array = [0]
+	inv.module_activated.connect(func(_sid: StringName) -> void:
+		inv_count[0] = int(inv_count[0]) + 1
+	)
+	var id_before: String = str(inv.call("get_screen_id"))
 	_assert_true("module_reject_boot", inv.call("configure_screen", &"boot") == false)
 	_assert_true("module_reject_login", inv.call("configure_screen", &"login") == false)
 	_assert_true("module_reject_lobby", inv.call("configure_screen", &"lobby") == false)
 	_assert_true("module_reject_unknown", inv.call("configure_screen", &"xyz") == false)
+	_assert_eq("invalid_config_activation_count", int(inv_count[0]), 0)
+	_assert_eq("invalid_config_id_unchanged", str(inv.call("get_screen_id")), id_before)
+	print("[INFO] invalid configure activation_count=0")
 	inv.queue_free()
 
 	# back signal once
@@ -279,7 +322,50 @@ func _run_shell_module_flow_tests() -> void:
 	var c1: int = int(_shell.call("get_screen_host_child_count"))
 	_nav().call("navigate_to", &"settings", true)
 	_assert_eq("shell_no_dup_children", int(_shell.call("get_screen_host_child_count")), c1)
+
+	_run_ui_cancel_tests()
 	print("[INFO] shell module flow and host child count checks passed")
+
+
+func _run_ui_cancel_tests() -> void:
+	# History case: Lobby → Adventure → ui_cancel
+	_nav().call("reset", &"lobby")
+	_nav().call("navigate_to", &"adventure", true)
+	_assert_eq("ui_cancel_hist_prep", str(_shell.call("get_active_screen_id")), "adventure")
+	var cancel_hist := InputEventAction.new()
+	cancel_hist.action = "ui_cancel"
+	cancel_hist.pressed = true
+	_shell.call("_unhandled_input", cancel_hist)
+	_assert_eq("ui_cancel_hist_nav", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("ui_cancel_hist_active", str(_shell.call("get_active_screen_id")), "lobby")
+	_assert_eq("ui_cancel_hist_host_1", int(_shell.call("get_screen_host_child_count")), 1)
+	print("[INFO] ui_cancel history case: adventure -> lobby")
+
+	# Empty-history fallback: reset farm then cancel
+	_nav().call("reset", &"farm")
+	_assert_eq("ui_cancel_fb_prep", str(_shell.call("get_active_screen_id")), "farm")
+	_assert_eq("ui_cancel_fb_hist0", int(_nav().call("get_history_size")), 0)
+	var cancel_fb := InputEventAction.new()
+	cancel_fb.action = "ui_cancel"
+	cancel_fb.pressed = true
+	_shell.call("_unhandled_input", cancel_fb)
+	_assert_eq("ui_cancel_fb_nav", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("ui_cancel_fb_active", str(_shell.call("get_active_screen_id")), "lobby")
+	_assert_eq("ui_cancel_fb_hist", int(_nav().call("get_history_size")), 0)
+	_assert_eq("ui_cancel_fb_host_1", int(_shell.call("get_screen_host_child_count")), 1)
+	print("[INFO] ui_cancel fallback case: farm -> lobby hist=0")
+
+	# Login no-op
+	_nav().call("reset", &"login")
+	_assert_eq("ui_cancel_login_prep", str(_shell.call("get_active_screen_id")), "login")
+	var cancel_login := InputEventAction.new()
+	cancel_login.action = "ui_cancel"
+	cancel_login.pressed = true
+	_shell.call("_unhandled_input", cancel_login)
+	_assert_eq("ui_cancel_login_nav", str(_nav().call("get_current_screen")), "login")
+	_assert_eq("ui_cancel_login_active", str(_shell.call("get_active_screen_id")), "login")
+	_assert_eq("ui_cancel_login_host_1", int(_shell.call("get_screen_host_child_count")), 1)
+	print("[INFO] ui_cancel login no-op; quit not invoked")
 
 
 func _cleanup_shell() -> void:

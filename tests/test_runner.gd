@@ -9,7 +9,7 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (0.2.0) ===")
+	print("=== FeiBao Test Runner (0.3.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
 

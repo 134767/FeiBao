@@ -68,5 +68,5 @@ git checkout -b feature/<task-name>
 ## Safety Reminders
 
 - Offline-first and clean-room: original work only.
-- Player name is memory-only in 0.2.0 — do not add disk saves without a dedicated task.
+- Player name remains memory-only in 0.3.0 — do not add disk saves without a dedicated task.
 - Do not unpack or import commercial game APK content.
