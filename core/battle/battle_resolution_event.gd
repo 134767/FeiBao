@@ -526,11 +526,17 @@ static func _require_movements(raw: Variant) -> Dictionary:
 
 
 ## Strict TYPE_INT coordinates only — no float/string/bool coercion.
+## Fixed key contract: String "x"/"y" only (StringName keys rejected).
 static func _is_xy_dict_in_bounds(v: Variant) -> bool:
 	if not (v is Dictionary):
 		return false
 	var d: Dictionary = v as Dictionary
-	if d.size() != 2 or not d.has("x") or not d.has("y"):
+	if d.size() != 2:
+		return false
+	for k in d.keys():
+		if typeof(k) != TYPE_STRING:
+			return false
+	if not d.has("x") or not d.has("y"):
 		return false
 	var x: Variant = d.get("x")
 	var y: Variant = d.get("y")
