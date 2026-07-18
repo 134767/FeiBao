@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.6.0** — character ownership integrated with the catalog.
+**Current version: 0.7.0** — active party formation with profile schema 2.
 
 Does **not** claim production multiplayer, combat, or cloud systems.
 
@@ -16,7 +16,8 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 | 0.3.0 | Registry metadata, shared ModuleScreen, module navigation |
 | 0.4.0 | Dedicated character catalog module + development seeds |
 | 0.5.0 | Local versioned player profile, staged save, backup recovery |
-| **0.6.0 (current)** | Ownership + representative wired into character catalog UI |
+| 0.6.0 | Ownership + representative wired into character catalog UI |
+| **0.7.0 (current)** | Active party formation + profile schema 2 + lazy schema 1 migration |
 
 ## Clean-room Principles
 
@@ -45,7 +46,16 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
   → Login (prefill name; manual submit) → Lobby
   ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
   ⇄ CharacterScreen (catalog + ownership / representative)
+  ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
+
+## Active Party (0.7.0)
+
+- `PlayerProfile` schema **2** adds `active_party_character_ids`.
+- Schema 1 loads migrate in memory; disk upgrades on next successful changed save.
+- Party leader is index 0; independent of `selected_character_id`.
+
+See `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`.
 
 ## Character Ownership (0.6.0)
 

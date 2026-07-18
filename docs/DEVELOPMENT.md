@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.6.0**
+- **App version:** **0.7.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -60,6 +60,12 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Default ownership: `feibao_dev` only; partners are not auto-granted
 - Catalog UI filters and representative selection; no grant UI in this version
 - See `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`
+
+## Active Party (0.7.0)
+
+- Profile schema **2**; schema 1 loads with lazy migration (no boot write)
+- Dedicated PartyScreen; party mutations via `PlayerData` only
+- See `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`
 
 ## Git Branch & PR Rules
 

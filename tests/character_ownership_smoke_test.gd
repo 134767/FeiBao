@@ -130,7 +130,7 @@ func _primary_mtime_or_empty() -> int:
 
 func _run_profile_mutation_tests() -> void:
 	var base: PlayerProfile = PlayerProfile.create_default()
-	_assert_eq("mut_schema", base.get_schema_version(), 1)
+	_assert_eq("mut_schema", base.get_schema_version(), 2)
 	_assert_eq("mut_default_owned", base.get_owned_character_ids().size(), 1)
 	_assert_eq("mut_default_selected", str(base.get_selected_character_id()), "feibao_dev")
 
