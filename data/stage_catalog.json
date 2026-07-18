@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "catalog_kind": "development_seed",
+  "areas": [
+    {
+      "id": "dev_area_beginner_path",
+      "display_name": "開發樣本區域·初行小徑",
+      "summary": "開發樣本：新手熟悉冒險選關流程的第一片區域。",
+      "story_intro": "【開發樣本故事】飛寶踏上初行小徑。這裡只是用來驗證關卡選擇與故事顯示的樣本文案，非正式世界觀。",
+      "sort_order": 10,
+      "is_development_seed": true,
+      "stages": [
+        {
+          "id": "dev_stage_beginner_01",
+          "display_name": "開發樣本關卡 1-1",
+          "summary": "開發樣本：初行小徑第一關。",
+          "stage_number": 1,
+          "sort_order": 10,
+          "is_development_seed": true
+        },
+        {
+          "id": "dev_stage_beginner_02",
+          "display_name": "開發樣本關卡 1-2",
+          "summary": "開發樣本：初行小徑第二關。",
+          "stage_number": 2,
+          "sort_order": 20,
+          "is_development_seed": true
+        },
+        {
+          "id": "dev_stage_beginner_03",
+          "display_name": "開發樣本關卡 1-3",
+          "summary": "開發樣本：初行小徑第三關。",
+          "stage_number": 3,
+          "sort_order": 30,
+          "is_development_seed": true
+        }
+      ]
+    },
+    {
+      "id": "dev_area_mist_ridge",
+      "display_name": "開發樣本區域·霧嶺試煉",
+      "summary": "開發樣本：第二片用於切換區域與故事內容的測試區域。",
+      "story_intro": "【開發樣本故事】霧嶺試煉僅供驗證區域切換與關卡網格。雲霧中的細節將於後續正式世界觀中再定稿。",
+      "sort_order": 20,
+      "is_development_seed": true,
+      "stages": [
+        {
+          "id": "dev_stage_mist_01",
+          "display_name": "開發樣本關卡 2-1",
+          "summary": "開發樣本：霧嶺試煉第一關。",
+          "stage_number": 1,
+          "sort_order": 10,
+          "is_development_seed": true
+        },
+        {
+          "id": "dev_stage_mist_02",
+          "display_name": "開發樣本關卡 2-2",
+          "summary": "開發樣本：霧嶺試煉第二關。",
+          "stage_number": 2,
+          "sort_order": 20,
+          "is_development_seed": true
+        },
+        {
+          "id": "dev_stage_mist_03",
+          "display_name": "開發樣本關卡 2-3",
+          "summary": "開發樣本：霧嶺試煉第三關。",
+          "stage_number": 3,
+          "sort_order": 30,
+          "is_development_seed": true
+        }
+      ]
+    }
+  ]
+}

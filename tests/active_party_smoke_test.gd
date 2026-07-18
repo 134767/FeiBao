@@ -510,7 +510,7 @@ func _run_party_screen_tests() -> void:
 	PlayerData.initialize()
 	_nav().call("reset", &"login")
 	_assert_eq("reg_party_path", ScreenRegistry.get_scene_path(&"party"), "res://scenes/screens/party/party_screen.tscn")
-	_assert_eq("reg_adv_path", ScreenRegistry.get_scene_path(&"adventure"), "res://scenes/screens/module/module_screen.tscn")
+	_assert_eq("reg_adv_path", ScreenRegistry.get_scene_path(&"adventure"), "res://scenes/screens/adventure/adventure_screen.tscn")
 
 	var packed: PackedScene = load("res://scenes/screens/party/party_screen.tscn") as PackedScene
 	var screen: Control = packed.instantiate() as Control

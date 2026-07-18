@@ -365,12 +365,17 @@ func _run_registry_tests() -> void:
 	_assert_eq("reg_module_order_3", str(modules[3]), "inventory")
 	_assert_eq("reg_module_order_4", str(modules[4]), "farm")
 	_assert_eq("reg_module_order_5", str(modules[5]), "settings")
-	for mid in [&"adventure", &"inventory", &"farm", &"settings"]:
+	for mid in [&"inventory", &"farm", &"settings"]:
 		_assert_eq(
 			"reg_placeholder_path_%s" % str(mid),
 			ScreenRegistry.get_scene_path(mid),
 			"res://scenes/screens/module/module_screen.tscn"
 		)
+	_assert_eq(
+		"reg_adventure_dedicated_path",
+		ScreenRegistry.get_scene_path(&"adventure"),
+		"res://scenes/screens/adventure/adventure_screen.tscn"
+	)
 	_assert_eq(
 		"reg_party_dedicated_path",
 		ScreenRegistry.get_scene_path(&"party"),

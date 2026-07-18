@@ -229,7 +229,8 @@ func _probe_size(size: Vector2i) -> void:
 			)
 
 	# --- Module screen ---
-	nav.call("navigate_to", &"adventure", true)
+	# Use shared ModuleScreen placeholder (inventory), not dedicated adventure/party/character.
+	nav.call("navigate_to", &"inventory", true)
 	await _tree.process_frame
 	await _tree.process_frame
 	var module: Control = shell.call("get_active_screen") as Control
