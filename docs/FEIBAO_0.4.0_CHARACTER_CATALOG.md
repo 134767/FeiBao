@@ -36,14 +36,21 @@ Players can:
 
 | Field | Rules |
 |-------|--------|
-| `schema_version` | Must be exactly `1` |
+| `schema_version` | Must be JSON **exact integer** `1` (accepts `1` / `1.0`; rejects `1.5` and non-numeric types) |
 | `catalog_kind` | Must be `development_seed` |
 | `id` | Non-empty, unique, `^[a-z0-9_]+$` |
 | `display_name` / `species` / `summary` / `description` | Non-empty strings |
 | `tags` | Non-empty array of non-empty strings |
-| `sort_order` | Non-negative int; primary sort key |
+| `sort_order` | Non-negative JSON **exact integer** (accepts `2` / `2.0`; rejects `2.7`, `-0.5`); primary sort key |
 | `portrait_path` | String; empty → native placeholder glyph |
-| `is_development_seed` | Bool; all current seeds must be `true` |
+| `is_development_seed` | Bool; for `development_seed` catalogs **must be `true`** ( `false` fails the whole catalog) |
+
+### Strict numeric validation
+
+- Godot JSON may surface numbers as float Variants.
+- Loader accepts only finite values with **no fractional component** (`value == floor(value)`).
+- Values are **not** validated by silent `int(value)` truncation (so `1.5` never becomes schema `1`).
+- Shared helper is used for both `schema_version` and `sort_order`.
 
 Sort order: `sort_order` ascending, then `id` ascending.
 
@@ -52,6 +59,7 @@ Sort order: `sort_order` ascending, then `id` ascending.
 - All six records are **informal development samples**, not final lore.
 - First seed: **飛寶（開發樣本）**.
 - Others: **夥伴 A–E**.
+- Because `catalog_kind` is `development_seed`, every character's `is_development_seed` **must be exactly `true`**; a single `false` rejects the full catalog (empty result list).
 - UI shows an explicit **開發樣本** badge / seed hint.
 - Do **not** describe seeds as playable production characters.
 - Do **not** add commercial game names, art, or third-party assets.

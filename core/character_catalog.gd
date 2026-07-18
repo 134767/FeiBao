@@ -39,9 +39,10 @@ static func parse_json_text(text: String) -> Dictionary:
 static func _validate_and_build(root: Dictionary) -> Dictionary:
 	if not root.has("schema_version"):
 		return _fail("missing schema_version")
-	if typeof(root["schema_version"]) != TYPE_FLOAT and typeof(root["schema_version"]) != TYPE_INT:
-		return _fail("schema_version must be int")
-	var schema_version: int = int(root["schema_version"])
+	var schema_int_result: Dictionary = _parse_exact_integer(root["schema_version"], "schema_version")
+	if not bool(schema_int_result.get("ok", false)):
+		return _fail(str(schema_int_result.get("error", "schema_version must be an exact integer")))
+	var schema_version: int = int(schema_int_result["value"])
 	if schema_version != EXPECTED_SCHEMA_VERSION:
 		return _fail("schema_version must be %d" % EXPECTED_SCHEMA_VERSION)
 
@@ -132,18 +133,24 @@ static func _parse_character(raw: Dictionary, index: int) -> Dictionary:
 			return _fail_char("characters[%d].tags must contain non-empty strings" % index)
 		tags.append(str(t).strip_edges())
 
-	var sort_type: int = typeof(raw["sort_order"])
-	if sort_type != TYPE_FLOAT and sort_type != TYPE_INT:
-		return _fail_char("characters[%d].sort_order must be int" % index)
-	var sort_order: int = int(raw["sort_order"])
+	var sort_field: String = "characters[%d].sort_order" % index
+	var sort_int_result: Dictionary = _parse_exact_integer(raw["sort_order"], sort_field)
+	if not bool(sort_int_result.get("ok", false)):
+		return _fail_char(str(sort_int_result.get("error", "%s must be an exact integer" % sort_field)))
+	var sort_order: int = int(sort_int_result["value"])
 	if sort_order < 0:
-		return _fail_char("characters[%d].sort_order must be non-negative" % index)
+		return _fail_char("%s must be non-negative" % sort_field)
 
 	if typeof(raw["portrait_path"]) != TYPE_STRING:
 		return _fail_char("characters[%d].portrait_path must be String" % index)
 
 	if typeof(raw["is_development_seed"]) != TYPE_BOOL:
 		return _fail_char("characters[%d].is_development_seed must be bool" % index)
+	# development_seed catalogs require every record to be an explicit development seed.
+	if raw["is_development_seed"] != true:
+		return _fail_char(
+			"characters[%d].is_development_seed must be true for development_seed catalog" % index
+		)
 
 	var def := CharacterDefinition.new(
 		StringName(id_str),
@@ -154,9 +161,41 @@ static func _parse_character(raw: Dictionary, index: int) -> Dictionary:
 		tags,
 		sort_order,
 		str(raw["portrait_path"]),
-		bool(raw["is_development_seed"])
+		true
 	)
 	return {"ok": true, "definition": def, "error": ""}
+
+
+## Accept TYPE_INT or TYPE_FLOAT only when the value is a finite exact integer (e.g. 1, 1.0).
+## Rejects fractional values (1.5), non-finite numbers, strings, bools, and null.
+## Does not judge validity via int(value) truncation.
+static func _parse_exact_integer(value: Variant, field_name: String) -> Dictionary:
+	var value_type: int = typeof(value)
+	if value_type != TYPE_INT and value_type != TYPE_FLOAT:
+		return {
+			"ok": false,
+			"value": 0,
+			"error": "%s must be an exact integer" % field_name,
+		}
+	var as_float: float = float(value)
+	if not is_finite(as_float):
+		return {
+			"ok": false,
+			"value": 0,
+			"error": "%s must be an exact integer" % field_name,
+		}
+	# Reject any fractional component; do not accept int(1.5) == 1 as proof of validity.
+	if as_float != floor(as_float):
+		return {
+			"ok": false,
+			"value": 0,
+			"error": "%s must be an exact integer" % field_name,
+		}
+	return {
+		"ok": true,
+		"value": int(as_float),
+		"error": "",
+	}
 
 
 static func _compare_definitions(a: CharacterDefinition, b: CharacterDefinition) -> bool:

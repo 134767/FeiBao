@@ -45,8 +45,9 @@ Bootstrap → GameShell → Boot → Login → Lobby
 
 ## Character Catalog (0.4.0)
 
-- JSON schema version `1`, kind `development_seed`.
-- Six informal seed records (not final lore).
+- JSON schema version `1` (exact integer; `1.0` ok, fractional values rejected), kind `development_seed`.
+- Six informal seed records (not final lore); every record must have `is_development_seed: true`.
+- `sort_order` is a non-negative exact integer (`2.0` ok; `2.7` / `-0.5` rejected).
 - Search / select / detail; native glyph placeholder when `portrait_path` is empty.
 - No ownership, progression, combat stats, or persistence.
 

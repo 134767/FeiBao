@@ -153,7 +153,164 @@ func _run_data_contract_tests() -> void:
 		_assert_eq("catalog_sort_1", str((sorted_chars[1] as CharacterDefinition).get_id()), "a_id")
 		_assert_eq("catalog_sort_2", str((sorted_chars[2] as CharacterDefinition).get_id()), "b_id")
 
+	_run_strict_integer_and_seed_contract_tests()
+
 	print("[INFO] character catalog data contract validations passed")
+
+
+## Strict exact-integer + development_seed=true contract (GROK-009).
+func _run_strict_integer_and_seed_contract_tests() -> void:
+	# --- schema_version exact integer ---
+	var schema_1_0: Dictionary = CharacterCatalog.parse_json_text(
+		'{"schema_version":1.0,"catalog_kind":"development_seed","characters":[]}'
+	)
+	_assert_true("strict_schema_1_0_accepted", bool(schema_1_0.get("ok", false)))
+	_assert_eq("strict_schema_1_0_chars_empty", (schema_1_0.get("characters", [1]) as Array).size(), 0)
+
+	var schema_1_5: Dictionary = CharacterCatalog.parse_json_text(
+		'{"schema_version":1.5,"catalog_kind":"development_seed","characters":[]}'
+	)
+	_assert_true("strict_schema_1_5_rejected", bool(schema_1_5.get("ok", true)) == false)
+	_assert_true(
+		"strict_schema_1_5_msg_field",
+		str(schema_1_5.get("error", "")).find("schema_version") >= 0
+	)
+	_assert_true(
+		"strict_schema_1_5_msg_exact",
+		str(schema_1_5.get("error", "")).find("exact integer") >= 0
+	)
+	_assert_eq("strict_schema_1_5_empty_chars", (schema_1_5.get("characters", [1]) as Array).size(), 0)
+
+	# --- sort_order exact integer ---
+	var sort_2_0: Dictionary = CharacterCatalog.parse_json_text(
+		_one_char_json_with_sort_literal("ok_id", "N", "2.0", true)
+	)
+	_assert_true("strict_sort_2_0_accepted", bool(sort_2_0.get("ok", false)))
+	var sort_2_0_chars: Array = sort_2_0.get("characters", [])
+	_assert_eq("strict_sort_2_0_count", sort_2_0_chars.size(), 1)
+	if sort_2_0_chars.size() == 1:
+		_assert_eq(
+			"strict_sort_2_0_value",
+			int((sort_2_0_chars[0] as CharacterDefinition).get_sort_order()),
+			2
+		)
+
+	var sort_2_7: Dictionary = CharacterCatalog.parse_json_text(
+		_one_char_json_with_sort_literal("ok_id", "N", "2.7", true)
+	)
+	_assert_true("strict_sort_2_7_rejected", bool(sort_2_7.get("ok", true)) == false)
+	_assert_true(
+		"strict_sort_2_7_msg_field",
+		str(sort_2_7.get("error", "")).find("sort_order") >= 0
+	)
+	_assert_true(
+		"strict_sort_2_7_msg_exact",
+		str(sort_2_7.get("error", "")).find("exact integer") >= 0
+	)
+	_assert_eq("strict_sort_2_7_empty_chars", (sort_2_7.get("characters", [1]) as Array).size(), 0)
+
+	var sort_neg_frac: Dictionary = CharacterCatalog.parse_json_text(
+		_one_char_json_with_sort_literal("ok_id", "N", "-0.5", true)
+	)
+	_assert_true("strict_sort_neg_frac_rejected", bool(sort_neg_frac.get("ok", true)) == false)
+	_assert_true(
+		"strict_sort_neg_frac_msg_field",
+		str(sort_neg_frac.get("error", "")).find("sort_order") >= 0
+	)
+	_assert_eq(
+		"strict_sort_neg_frac_empty_chars",
+		(sort_neg_frac.get("characters", [1]) as Array).size(),
+		0
+	)
+
+	# --- is_development_seed must be true for development_seed catalog ---
+	var seed_true: Dictionary = CharacterCatalog.parse_json_text(
+		_one_char_json("seed_ok", "Seed", 0, true)
+	)
+	_assert_true("strict_seed_true_accepted", bool(seed_true.get("ok", false)))
+	var seed_true_chars: Array = seed_true.get("characters", [])
+	_assert_eq("strict_seed_true_count", seed_true_chars.size(), 1)
+	if seed_true_chars.size() == 1:
+		_assert_true(
+			"strict_seed_true_flag",
+			bool((seed_true_chars[0] as CharacterDefinition).is_development_seed())
+		)
+
+	var seed_false: Dictionary = CharacterCatalog.parse_json_text(
+		_one_char_json("seed_bad", "Seed", 0, false)
+	)
+	_assert_true("strict_seed_false_rejected", bool(seed_false.get("ok", true)) == false)
+	_assert_true(
+		"strict_seed_false_msg_field",
+		str(seed_false.get("error", "")).find("is_development_seed") >= 0
+	)
+	_assert_true(
+		"strict_seed_false_msg_true",
+		str(seed_false.get("error", "")).find("must be true") >= 0
+	)
+	_assert_eq("strict_seed_false_empty_chars", (seed_false.get("characters", [1]) as Array).size(), 0)
+
+	# Default catalog still six true seeds
+	var default_again: Dictionary = CharacterCatalog.load_default()
+	_assert_true("strict_default_ok", bool(default_again.get("ok", false)))
+	var default_chars: Array = default_again.get("characters", [])
+	_assert_eq("strict_default_seed_count", default_chars.size(), 6)
+	var all_true: bool = true
+	for d in default_chars:
+		if d is CharacterDefinition and not (d as CharacterDefinition).is_development_seed():
+			all_true = false
+	_assert_true("strict_default_all_true", all_true)
+
+	# Integrity: deterministic order still holds after strict rules
+	var integrity_sort: Dictionary = CharacterCatalog.parse_json_text(
+		'{"schema_version":1.0,"catalog_kind":"development_seed","characters":['
+		+ _char_obj("b_id", "B", 1) + ","
+		+ _char_obj("a_id", "A", 1) + ","
+		+ _char_obj("z_id", "Z", 0)
+		+ "]}"
+	)
+	_assert_true("strict_integrity_sort_ok", bool(integrity_sort.get("ok", false)))
+	var ic: Array = integrity_sort.get("characters", [])
+	_assert_eq("strict_integrity_sort_count", ic.size(), 3)
+	if ic.size() == 3:
+		_assert_eq("strict_integrity_sort_0", str((ic[0] as CharacterDefinition).get_id()), "z_id")
+		_assert_eq("strict_integrity_sort_1", str((ic[1] as CharacterDefinition).get_id()), "a_id")
+		_assert_eq("strict_integrity_sort_2", str((ic[2] as CharacterDefinition).get_id()), "b_id")
+
+	# Integrity: duplicate ID still rejected with empty list
+	var integrity_dup: Dictionary = CharacterCatalog.parse_json_text(
+		'{"schema_version":1,"catalog_kind":"development_seed","characters":['
+		+ _char_obj("dup_id", "A", 0) + "," + _char_obj("dup_id", "B", 1)
+		+ "]}"
+	)
+	_assert_true("strict_integrity_dup_rejected", bool(integrity_dup.get("ok", true)) == false)
+	_assert_eq("strict_integrity_dup_empty", (integrity_dup.get("characters", [1]) as Array).size(), 0)
+
+	# Integrity: invalid type (string schema) still rejected
+	var integrity_type: Dictionary = CharacterCatalog.parse_json_text(
+		'{"schema_version":"1","catalog_kind":"development_seed","characters":[]}'
+	)
+	_assert_true("strict_integrity_type_rejected", bool(integrity_type.get("ok", true)) == false)
+	_assert_true(
+		"strict_integrity_type_msg",
+		str(integrity_type.get("error", "")).find("schema_version") >= 0
+	)
+
+	# Integrity: tag mutation protection still holds
+	var mut: Dictionary = CharacterCatalog.parse_json_text(_one_char_json("mut_id", "M", 0, true))
+	_assert_true("strict_integrity_mut_ok", bool(mut.get("ok", false)))
+	var mut_chars: Array = mut.get("characters", [])
+	if mut_chars.size() == 1:
+		var tags_copy: Array[String] = (mut_chars[0] as CharacterDefinition).get_tags()
+		var before: int = tags_copy.size()
+		tags_copy.append("mutated")
+		_assert_eq(
+			"strict_integrity_tags_not_mutated",
+			(mut_chars[0] as CharacterDefinition).get_tags().size(),
+			before
+		)
+
+	print("[INFO] strict integer and development seed contract regressions passed")
 
 
 func _one_char_json(id: String, display_name: String, sort_order: int, seed_flag: bool) -> String:
@@ -163,6 +320,22 @@ func _one_char_json(id: String, display_name: String, sort_order: int, seed_flag
 		% [id, display_name]
 		+ '"tags":["t"],"sort_order":%d,"portrait_path":"","is_development_seed":%s}]}'
 		% [sort_order, "true" if seed_flag else "false"]
+	)
+
+
+## sort_order_literal is embedded raw (e.g. "2.0", "2.7", "-0.5") to probe JSON float handling.
+func _one_char_json_with_sort_literal(
+	id: String,
+	display_name: String,
+	sort_order_literal: String,
+	seed_flag: bool
+) -> String:
+	return (
+		'{"schema_version":1,"catalog_kind":"development_seed","characters":['
+		+ '{"id":"%s","display_name":"%s","species":"S","summary":"U","description":"D",'
+		% [id, display_name]
+		+ '"tags":["t"],"sort_order":%s,"portrait_path":"","is_development_seed":%s}]}'
+		% [sort_order_literal, "true" if seed_flag else "false"]
 	)
 
 
