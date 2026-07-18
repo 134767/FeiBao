@@ -44,6 +44,7 @@ Same-session idempotent begin requires **all four** equal. Same area/stage with 
 - Snapshot restore validates events + counters; illegal data fail closed with zero signals.
 - **Null is not empty**: only `[]` is empty events; `null` rejected.
 - Counts and coordinates require **TYPE_INT** (no float/string/bool coercion).
+- Coordinate dict keys require **String** `"x"`/`"y"` (StringName keys rejected).
 - type / orb kinds: **StringName**; swap_rejected.reason: **TYPE_STRING**.
 - Event equality is typed only (no `str()` / serialization).
 - Keyboard: real KEY_ENTER / KEY_SPACE; board focus escape to Back/Leave via neighbor graph.
@@ -106,6 +107,46 @@ Preserves GROK-027 leave guard; order:
 ## Explicit exclusions
 
 No enemies, HP/MP, damage, skills, AI, win/loss, rewards, progression save, schema 3, network, Android/APK, third-party assets.
+
+## GROK-033 scalar evidence matrix
+
+Evidence-first closeout for strict event scalar / reference schema (GROK-032 implementation retained).
+
+### Count type matrix
+- `cascade_index` on `match_found` / `cells_cleared` / `cascade_completed`: reject String `"1"`, Float `1.0`, Bool `true`, `null`
+- `turn_count` / `cascade_count` on `turn_completed`: same illegal types
+- `cleared_cell_count` on `cascade_completed` + `turn_completed`: String `"3"`, Float `3.0`, Bool, `null`
+- Ranges retained: cascade_index/turn_count/cascade_count `0`/`-1`; cleared_cell_count `2`/`0`/`-1`
+
+### Coordinate type matrix
+- `x`/`y` Float, String, Bool, `null` on `swap.from`, `match_found.matched_cells`, gravity `from`, refill `positions`
+- StringName keys (not String), extra `z`, missing `x`/`y` rejected under fixed key contract
+
+### Orb kind / type / reason matrices
+- `cells_cleared.orb_kinds` + `cells_refilled.kinds`: int, bool, String, null, unknown StringName, Object (`RefCounted`), Callable — all reject; fixtures not written to disk
+- `type`: String (not StringName), int, float, bool, null, Object, Callable, unknown StringName
+- `swap_rejected.reason`: StringName, int, float, bool, null, Object, Callable, empty String; legal non-empty String still passes
+
+### Equality cross-type matrix
+- int vs float/string/bool counts, int vs float/string coords, String vs StringName reason, StringName vs String/int orb kinds → `event_equal` false
+- unknown event self-compare false; Object payload self-compare false; legal same-typed events true
+
+### Runtime restore exact + zero-signal (per case)
+Each illegal restore case asserts: restore `ok=false`, active/area/stage/party/leader/board/rng/turn/phase/selection/match/cascade/events/message exact, and `runtime_changed` / `board_changed` / `phase_changed` delta 0 **before the next case**.
+
+### Recursive reference safety
+Nested Object/Callable at `from.x`, `matched_cells[0].x`, `movements[0].from.x`, `orb_kinds[0]`, `kinds[0]` → safe `ok=false` (no parser/runtime throw).
+
+### Source integrity
+Source scan + behavioral anchors: `validate_events(null)` false; `_require_int_field` TYPE_INT first (no `int(value)` coercion); `_is_xy_dict_in_bounds` TYPE_INT values + String keys; reason/orb equality without `str()`; no generic Dictionary equality in `event_equal`.
+
+### Test counts
+| Gate | Result |
+|------|--------|
+| GROK-033 baseline | **3424** passed / 0 failed |
+| GROK-033 final | **3687** passed / 0 failed |
+
+Version remains **1.0.0**.
 
 ## Licensing
 
