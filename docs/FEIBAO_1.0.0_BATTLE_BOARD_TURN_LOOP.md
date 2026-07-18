@@ -42,7 +42,10 @@ Same-session idempotent begin requires **all four** equal. Same area/stage with 
 - Resolution events have a **strict schema validator** (fixed key sets, bounds, adjacency, unique cells, movement contracts).
 - **Sequence validation**: empty | sole `swap_rejected` | `swap`…cascades…`turn_completed` with contiguous cascade indices.
 - Snapshot restore validates events + counters; illegal data fail closed with zero signals.
-- Unknown event types never compare equal (no string-key fallback).
+- **Null is not empty**: only `[]` is empty events; `null` rejected.
+- Counts and coordinates require **TYPE_INT** (no float/string/bool coercion).
+- type / orb kinds: **StringName**; swap_rejected.reason: **TYPE_STRING**.
+- Event equality is typed only (no `str()` / serialization).
 - Keyboard: real KEY_ENTER / KEY_SPACE; board focus escape to Back/Leave via neighbor graph.
 
 ## Deterministic RNG

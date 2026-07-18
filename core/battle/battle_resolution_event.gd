@@ -1,4 +1,5 @@
 ## Pure data resolution events for battle board moves (no Node / timestamps).
+## Strict scalar schema: TYPE_INT counts/coords, TYPE_STRING reason, StringName type/kinds.
 class_name BattleResolutionEvent
 extends RefCounted
 
@@ -71,6 +72,7 @@ static func make_gravity_applied(movements: Array) -> Dictionary:
 	for m in movements:
 		if m is Dictionary:
 			var d: Dictionary = m as Dictionary
+			# Production path: from_x/from_y are ints from engine.
 			moves.append({
 				"from": {"x": int(d.get("from_x", 0)), "y": int(d.get("from_y", 0))},
 				"to": {"x": int(d.get("to_x", 0)), "y": int(d.get("to_y", 0))},
@@ -114,10 +116,10 @@ static func duplicate_events(events: Array) -> Array:
 	return out
 
 
-## Strict schema + sequence validation. Returns {ok, error, events} with defensive copy on success.
+## Strict schema + sequence validation. null is NOT empty — only [].
 static func validate_events(events: Variant) -> Dictionary:
 	if events == null:
-		return {"ok": true, "error": "", "events": []}
+		return {"ok": false, "error": "events must be Array", "events": []}
 	if not (events is Array):
 		return {"ok": false, "error": "events must be Array", "events": []}
 	var arr: Array = events as Array
@@ -140,7 +142,6 @@ static func validate_events(events: Variant) -> Dictionary:
 	return {"ok": true, "error": "", "events": normalized}
 
 
-## Validate events against Runtime last_match_count / last_cascade_count.
 static func validate_events_with_counts(events: Variant, last_match: int, last_cascade: int) -> Dictionary:
 	var base: Dictionary = validate_events(events)
 	if not bool(base.get("ok", false)):
@@ -150,20 +151,20 @@ static func validate_events_with_counts(events: Variant, last_match: int, last_c
 		if last_match != 0 or last_cascade != 0:
 			return {"ok": false, "error": "empty events require zero counts", "events": []}
 		return base
-	var first_type: StringName = (arr[0] as Dictionary).get("type", &"") as StringName
+	var first_type: StringName = (arr[0] as Dictionary).get("type") as StringName
 	if first_type == TYPE_SWAP_REJECTED:
 		if arr.size() != 1:
 			return {"ok": false, "error": "swap_rejected must be sole event", "events": []}
 		if last_match != 0 or last_cascade != 0:
 			return {"ok": false, "error": "swap_rejected requires zero counts", "events": []}
 		return base
-	# Completed turn sequence
 	var last: Dictionary = arr[arr.size() - 1] as Dictionary
-	if (last.get("type", &"") as StringName) != TYPE_TURN_COMPLETED:
+	if (last.get("type") as StringName) != TYPE_TURN_COMPLETED:
 		return {"ok": false, "error": "non-empty move sequence must end with turn_completed", "events": []}
-	if int(last.get("cleared_cell_count", -1)) != last_match:
+	# Fields already schema-validated as TYPE_INT.
+	if (last.get("cleared_cell_count") as int) != last_match:
 		return {"ok": false, "error": "last_match_count mismatches turn_completed", "events": []}
-	if int(last.get("cascade_count", -1)) != last_cascade:
+	if (last.get("cascade_count") as int) != last_cascade:
 		return {"ok": false, "error": "last_cascade_count mismatches turn_completed", "events": []}
 	return base
 
@@ -172,7 +173,7 @@ static func validate_sequence(events: Array) -> Dictionary:
 	if events.is_empty():
 		return {"ok": true, "error": ""}
 	var first: Dictionary = events[0] as Dictionary
-	var ft: StringName = first.get("type", &"") as StringName
+	var ft: StringName = first.get("type") as StringName
 	if ft == TYPE_SWAP_REJECTED:
 		if events.size() != 1:
 			return {"ok": false, "error": "swap_rejected sequence must be length 1"}
@@ -180,30 +181,29 @@ static func validate_sequence(events: Array) -> Dictionary:
 	if ft != TYPE_SWAP:
 		return {"ok": false, "error": "valid move sequence must start with swap"}
 	var last: Dictionary = events[events.size() - 1] as Dictionary
-	if (last.get("type", &"") as StringName) != TYPE_TURN_COMPLETED:
+	if (last.get("type") as StringName) != TYPE_TURN_COMPLETED:
 		return {"ok": false, "error": "valid move sequence must end with turn_completed"}
-	# Walk cascades after swap.
 	var i: int = 1
 	var expected_cascade: int = 1
 	var total_cleared: int = 0
 	var cascade_count: int = 0
 	while i < events.size() - 1:
 		var e: Dictionary = events[i] as Dictionary
-		var t: StringName = e.get("type", &"") as StringName
+		var t: StringName = e.get("type") as StringName
 		if t != TYPE_MATCH_FOUND:
 			return {"ok": false, "error": "cascade expected match_found at index %d" % i}
-		if int(e.get("cascade_index", -1)) != expected_cascade:
+		if (e.get("cascade_index") as int) != expected_cascade:
 			return {"ok": false, "error": "cascade_index not contiguous"}
-		var matched: Array = e.get("matched_cells", []) as Array
+		var matched: Array = e.get("matched_cells") as Array
 		i += 1
 		if i >= events.size() - 1:
 			return {"ok": false, "error": "incomplete cascade after match_found"}
 		e = events[i] as Dictionary
-		if (e.get("type", &"") as StringName) != TYPE_CELLS_CLEARED:
+		if (e.get("type") as StringName) != TYPE_CELLS_CLEARED:
 			return {"ok": false, "error": "cascade expected cells_cleared"}
-		if int(e.get("cascade_index", -1)) != expected_cascade:
+		if (e.get("cascade_index") as int) != expected_cascade:
 			return {"ok": false, "error": "cells_cleared cascade_index mismatch"}
-		var cells: Array = e.get("cells", []) as Array
+		var cells: Array = e.get("cells") as Array
 		if not _xy_list_eq(matched, cells):
 			return {"ok": false, "error": "match_found cells != cells_cleared cells"}
 		total_cleared += cells.size()
@@ -211,32 +211,32 @@ static func validate_sequence(events: Array) -> Dictionary:
 		if i >= events.size() - 1:
 			return {"ok": false, "error": "incomplete cascade after cells_cleared"}
 		e = events[i] as Dictionary
-		if (e.get("type", &"") as StringName) != TYPE_GRAVITY_APPLIED:
+		if (e.get("type") as StringName) != TYPE_GRAVITY_APPLIED:
 			return {"ok": false, "error": "cascade expected gravity_applied"}
 		i += 1
 		if i >= events.size() - 1:
 			return {"ok": false, "error": "incomplete cascade after gravity"}
 		e = events[i] as Dictionary
-		if (e.get("type", &"") as StringName) != TYPE_CELLS_REFILLED:
+		if (e.get("type") as StringName) != TYPE_CELLS_REFILLED:
 			return {"ok": false, "error": "cascade expected cells_refilled"}
 		i += 1
 		if i >= events.size() - 1:
 			return {"ok": false, "error": "incomplete cascade after refill"}
 		e = events[i] as Dictionary
-		if (e.get("type", &"") as StringName) != TYPE_CASCADE_COMPLETED:
+		if (e.get("type") as StringName) != TYPE_CASCADE_COMPLETED:
 			return {"ok": false, "error": "cascade expected cascade_completed"}
-		if int(e.get("cascade_index", -1)) != expected_cascade:
+		if (e.get("cascade_index") as int) != expected_cascade:
 			return {"ok": false, "error": "cascade_completed index mismatch"}
-		if int(e.get("cleared_cell_count", -1)) != matched.size():
+		if (e.get("cleared_cell_count") as int) != matched.size():
 			return {"ok": false, "error": "cascade_completed cleared count mismatch"}
 		cascade_count += 1
 		expected_cascade += 1
 		i += 1
 	if cascade_count < 1:
 		return {"ok": false, "error": "valid move requires at least one cascade"}
-	if int(last.get("cascade_count", -1)) != cascade_count:
+	if (last.get("cascade_count") as int) != cascade_count:
 		return {"ok": false, "error": "turn_completed.cascade_count mismatch"}
-	if int(last.get("cleared_cell_count", -1)) != total_cleared:
+	if (last.get("cleared_cell_count") as int) != total_cleared:
 		return {"ok": false, "error": "turn_completed.cleared_cell_count mismatch"}
 	return {"ok": true, "error": ""}
 
@@ -247,12 +247,14 @@ static func validate_event(event: Variant) -> Dictionary:
 	var d: Dictionary = event as Dictionary
 	if not d.has("type"):
 		return {"ok": false, "error": "missing type"}
-	# Reject forbidden payload types in values (shallow).
 	for k in d.keys():
 		var v: Variant = d[k]
 		if v is Object or v is Callable or v is Object:
 			return {"ok": false, "error": "forbidden reference payload"}
-	var t: StringName = d.get("type", &"") as StringName
+	var type_v: Variant = d.get("type")
+	if typeof(type_v) != TYPE_STRING_NAME:
+		return {"ok": false, "error": "type must be StringName"}
+	var t: StringName = type_v as StringName
 	if not KNOWN_TYPES.has(t):
 		return {"ok": false, "error": "unknown event type"}
 	match t:
@@ -268,22 +270,28 @@ static func validate_event(event: Variant) -> Dictionary:
 			var pair: Dictionary = _validate_xy_pair_in_bounds(d.get("from"), d.get("to"))
 			if not bool(pair.get("ok", false)):
 				return pair
-			if typeof(d.get("reason")) != TYPE_STRING or str(d.get("reason")).is_empty():
-				return {"ok": false, "error": "reason must be non-empty string"}
+			var reason_v: Variant = d.get("reason")
+			if typeof(reason_v) != TYPE_STRING:
+				return {"ok": false, "error": "reason must be TYPE_STRING"}
+			var reason_s: String = reason_v as String
+			if reason_s.is_empty():
+				return {"ok": false, "error": "reason must be non-empty"}
 			return {"ok": true, "error": ""}
 		TYPE_MATCH_FOUND:
 			var keys_err3: String = _exact_keys(d, KEYS_MATCH_FOUND)
 			if not keys_err3.is_empty():
 				return {"ok": false, "error": keys_err3}
-			if int(d.get("cascade_index", -1)) < 1:
-				return {"ok": false, "error": "cascade_index >= 1 required"}
+			var ci: Dictionary = _require_int_field(d, "cascade_index", 1)
+			if not bool(ci.get("ok", false)):
+				return ci
 			return _require_xy_list(d.get("matched_cells"), "matched_cells", 3, true)
 		TYPE_CELLS_CLEARED:
 			var keys_err4: String = _exact_keys(d, KEYS_CELLS_CLEARED)
 			if not keys_err4.is_empty():
 				return {"ok": false, "error": keys_err4}
-			if int(d.get("cascade_index", -1)) < 1:
-				return {"ok": false, "error": "cascade_index >= 1 required"}
+			var ci2: Dictionary = _require_int_field(d, "cascade_index", 1)
+			if not bool(ci2.get("ok", false)):
+				return ci2
 			var cells_ok: Dictionary = _require_xy_list(d.get("cells"), "cells", 3, true)
 			if not bool(cells_ok.get("ok", false)):
 				return cells_ok
@@ -315,21 +323,26 @@ static func validate_event(event: Variant) -> Dictionary:
 			var keys_err7: String = _exact_keys(d, KEYS_CASCADE)
 			if not keys_err7.is_empty():
 				return {"ok": false, "error": keys_err7}
-			if int(d.get("cascade_index", -1)) < 1:
-				return {"ok": false, "error": "cascade_index >= 1 required"}
-			if int(d.get("cleared_cell_count", -1)) < 3:
-				return {"ok": false, "error": "cleared_cell_count >= 3 required"}
+			var ci3: Dictionary = _require_int_field(d, "cascade_index", 1)
+			if not bool(ci3.get("ok", false)):
+				return ci3
+			var cc: Dictionary = _require_int_field(d, "cleared_cell_count", 3)
+			if not bool(cc.get("ok", false)):
+				return cc
 			return {"ok": true, "error": ""}
 		TYPE_TURN_COMPLETED:
 			var keys_err8: String = _exact_keys(d, KEYS_TURN)
 			if not keys_err8.is_empty():
 				return {"ok": false, "error": keys_err8}
-			if int(d.get("turn_count", -1)) < 1:
-				return {"ok": false, "error": "turn_count >= 1 required"}
-			if int(d.get("cascade_count", -1)) < 1:
-				return {"ok": false, "error": "cascade_count >= 1 required"}
-			if int(d.get("cleared_cell_count", -1)) < 3:
-				return {"ok": false, "error": "cleared_cell_count >= 3 required"}
+			var tc: Dictionary = _require_int_field(d, "turn_count", 1)
+			if not bool(tc.get("ok", false)):
+				return tc
+			var cac: Dictionary = _require_int_field(d, "cascade_count", 1)
+			if not bool(cac.get("ok", false)):
+				return cac
+			var clc: Dictionary = _require_int_field(d, "cleared_cell_count", 3)
+			if not bool(clc.get("ok", false)):
+				return clc
 			return {"ok": true, "error": ""}
 		_:
 			return {"ok": false, "error": "unknown event type"}
@@ -344,6 +357,7 @@ static func events_equal(a: Array, b: Array) -> bool:
 	return true
 
 
+## Typed equality only — no str() / serialization.
 static func event_equal(a: Variant, b: Variant) -> bool:
 	var va: Dictionary = validate_event(a)
 	var vb: Dictionary = validate_event(b)
@@ -351,48 +365,62 @@ static func event_equal(a: Variant, b: Variant) -> bool:
 		return false
 	var da: Dictionary = a as Dictionary
 	var db: Dictionary = b as Dictionary
-	var ta: StringName = da.get("type", &"") as StringName
-	var tb: StringName = db.get("type", &"") as StringName
+	var ta: StringName = da.get("type") as StringName
+	var tb: StringName = db.get("type") as StringName
 	if ta != tb:
 		return false
 	match ta:
 		TYPE_SWAP, TYPE_SWAP_REJECTED:
-			if not _xy_dict_eq(da.get("from", {}), db.get("from", {})):
+			if not _xy_dict_eq(da.get("from"), db.get("from")):
 				return false
-			if not _xy_dict_eq(da.get("to", {}), db.get("to", {})):
+			if not _xy_dict_eq(da.get("to"), db.get("to")):
 				return false
-			if ta == TYPE_SWAP_REJECTED and str(da.get("reason", "")) != str(db.get("reason", "")):
-				return false
+			if ta == TYPE_SWAP_REJECTED:
+				# Both validated as TYPE_STRING.
+				return (da.get("reason") as String) == (db.get("reason") as String)
 			return true
 		TYPE_MATCH_FOUND:
-			if int(da.get("cascade_index", -1)) != int(db.get("cascade_index", -2)):
+			if (da.get("cascade_index") as int) != (db.get("cascade_index") as int):
 				return false
-			return _xy_list_eq(da.get("matched_cells", []), db.get("matched_cells", []))
+			return _xy_list_eq(da.get("matched_cells"), db.get("matched_cells"))
 		TYPE_CELLS_CLEARED:
-			if int(da.get("cascade_index", -1)) != int(db.get("cascade_index", -2)):
+			if (da.get("cascade_index") as int) != (db.get("cascade_index") as int):
 				return false
-			if not _xy_list_eq(da.get("cells", []), db.get("cells", [])):
+			if not _xy_list_eq(da.get("cells"), db.get("cells")):
 				return false
-			return _scalar_list_eq(da.get("orb_kinds", []), db.get("orb_kinds", []))
+			return _kind_list_eq(da.get("orb_kinds"), db.get("orb_kinds"))
 		TYPE_GRAVITY_APPLIED:
-			return _movements_eq(da.get("movements", []), db.get("movements", []))
+			return _movements_eq(da.get("movements"), db.get("movements"))
 		TYPE_CELLS_REFILLED:
-			if not _xy_list_eq(da.get("positions", []), db.get("positions", [])):
+			if not _xy_list_eq(da.get("positions"), db.get("positions")):
 				return false
-			return _scalar_list_eq(da.get("kinds", []), db.get("kinds", []))
+			return _kind_list_eq(da.get("kinds"), db.get("kinds"))
 		TYPE_CASCADE_COMPLETED:
 			return (
-				int(da.get("cascade_index", -1)) == int(db.get("cascade_index", -2))
-				and int(da.get("cleared_cell_count", -1)) == int(db.get("cleared_cell_count", -2))
+				(da.get("cascade_index") as int) == (db.get("cascade_index") as int)
+				and (da.get("cleared_cell_count") as int) == (db.get("cleared_cell_count") as int)
 			)
 		TYPE_TURN_COMPLETED:
 			return (
-				int(da.get("turn_count", -1)) == int(db.get("turn_count", -2))
-				and int(da.get("cascade_count", -1)) == int(db.get("cascade_count", -2))
-				and int(da.get("cleared_cell_count", -1)) == int(db.get("cleared_cell_count", -2))
+				(da.get("turn_count") as int) == (db.get("turn_count") as int)
+				and (da.get("cascade_count") as int) == (db.get("cascade_count") as int)
+				and (da.get("cleared_cell_count") as int) == (db.get("cleared_cell_count") as int)
 			)
 		_:
 			return false
+
+
+## Strict TYPE_INT field with minimum (inclusive). No coercion.
+static func _require_int_field(dictionary: Dictionary, field: String, minimum: int) -> Dictionary:
+	if not dictionary.has(field):
+		return {"ok": false, "error": "missing field %s" % field}
+	var value: Variant = dictionary.get(field)
+	if typeof(value) != TYPE_INT:
+		return {"ok": false, "error": "%s must be TYPE_INT" % field}
+	var iv: int = value as int
+	if iv < minimum:
+		return {"ok": false, "error": "%s must be >= %d" % [field, minimum]}
+	return {"ok": true, "error": "", "value": iv}
 
 
 static func _exact_keys(d: Dictionary, required: Array[String]) -> String:
@@ -402,8 +430,9 @@ static func _exact_keys(d: Dictionary, required: Array[String]) -> String:
 		if not d.has(k):
 			return "missing key %s" % k
 	for k in d.keys():
-		if not required.has(str(k)):
-			return "unexpected key %s" % str(k)
+		var ks: String = k as String if typeof(k) == TYPE_STRING else String(k)
+		if not required.has(ks):
+			return "unexpected key %s" % ks
 	return ""
 
 
@@ -413,10 +442,10 @@ static func _validate_adjacent_pair(from_v: Variant, to_v: Variant, require_adja
 		return base
 	var f: Dictionary = from_v as Dictionary
 	var t: Dictionary = to_v as Dictionary
-	var fx: int = int(f.get("x"))
-	var fy: int = int(f.get("y"))
-	var tx: int = int(t.get("x"))
-	var ty: int = int(t.get("y"))
+	var fx: int = f.get("x") as int
+	var fy: int = f.get("y") as int
+	var tx: int = t.get("x") as int
+	var ty: int = t.get("y") as int
 	if fx == tx and fy == ty:
 		return {"ok": false, "error": "from == to"}
 	if require_adjacent:
@@ -445,7 +474,9 @@ static func _require_xy_list(raw: Variant, field: String, min_size: int, unique:
 		if not _is_xy_dict_in_bounds(item):
 			return {"ok": false, "error": "%s contains invalid/out-of-bounds coordinate" % field}
 		var d: Dictionary = item as Dictionary
-		var key: String = "%d,%d" % [int(d.get("x")), int(d.get("y"))]
+		var xi: int = d.get("x") as int
+		var yi: int = d.get("y") as int
+		var key: String = "%d,%d" % [xi, yi]
 		if unique and seen.has(key):
 			return {"ok": false, "error": "%s has duplicate coordinates" % field}
 		seen[key] = true
@@ -459,7 +490,10 @@ static func _require_kind_list(raw: Variant, field: String, allow_empty: bool) -
 	if not allow_empty and arr.is_empty():
 		return {"ok": false, "error": "%s must not be empty" % field}
 	for item in arr:
-		if not BattleOrbKind.is_valid(item as StringName):
+		if typeof(item) != TYPE_STRING_NAME:
+			return {"ok": false, "error": "%s items must be TYPE_STRING_NAME" % field}
+		var k: StringName = item as StringName
+		if not BattleOrbKind.is_valid(k):
 			return {"ok": false, "error": "%s contains invalid orb kind" % field}
 	return {"ok": true, "error": ""}
 
@@ -478,10 +512,10 @@ static func _require_movements(raw: Variant) -> Dictionary:
 			return {"ok": false, "error": "movement coordinate invalid"}
 		var f: Dictionary = d.get("from") as Dictionary
 		var t: Dictionary = d.get("to") as Dictionary
-		var fx: int = int(f.get("x"))
-		var fy: int = int(f.get("y"))
-		var tx: int = int(t.get("x"))
-		var ty: int = int(t.get("y"))
+		var fx: int = f.get("x") as int
+		var fy: int = f.get("y") as int
+		var tx: int = t.get("x") as int
+		var ty: int = t.get("y") as int
 		if fx != tx:
 			return {"ok": false, "error": "movement must stay in same column"}
 		if ty < fy:
@@ -491,6 +525,7 @@ static func _require_movements(raw: Variant) -> Dictionary:
 	return {"ok": true, "error": ""}
 
 
+## Strict TYPE_INT coordinates only — no float/string/bool coercion.
 static func _is_xy_dict_in_bounds(v: Variant) -> bool:
 	if not (v is Dictionary):
 		return false
@@ -499,16 +534,10 @@ static func _is_xy_dict_in_bounds(v: Variant) -> bool:
 		return false
 	var x: Variant = d.get("x")
 	var y: Variant = d.get("y")
-	if typeof(x) != TYPE_INT and typeof(x) != TYPE_FLOAT:
+	if typeof(x) != TYPE_INT or typeof(y) != TYPE_INT:
 		return false
-	if typeof(y) != TYPE_INT and typeof(y) != TYPE_FLOAT:
-		return false
-	if typeof(x) == TYPE_FLOAT and float(x) != floor(float(x)):
-		return false
-	if typeof(y) == TYPE_FLOAT and float(y) != floor(float(y)):
-		return false
-	var xi: int = int(x)
-	var yi: int = int(y)
+	var xi: int = x as int
+	var yi: int = y as int
 	return BattleBoardModel.in_bounds(xi, yi)
 
 
@@ -517,7 +546,7 @@ static func _xy_dict_eq(a: Variant, b: Variant) -> bool:
 		return false
 	var da: Dictionary = a as Dictionary
 	var db: Dictionary = b as Dictionary
-	return int(da.get("x")) == int(db.get("x")) and int(da.get("y")) == int(db.get("y"))
+	return (da.get("x") as int) == (db.get("x") as int) and (da.get("y") as int) == (db.get("y") as int)
 
 
 static func _xy_list_eq(a: Variant, b: Variant) -> bool:
@@ -533,7 +562,7 @@ static func _xy_list_eq(a: Variant, b: Variant) -> bool:
 	return true
 
 
-static func _scalar_list_eq(a: Variant, b: Variant) -> bool:
+static func _kind_list_eq(a: Variant, b: Variant) -> bool:
 	if not (a is Array) or not (b is Array):
 		return false
 	var aa: Array = a as Array
@@ -541,7 +570,9 @@ static func _scalar_list_eq(a: Variant, b: Variant) -> bool:
 	if aa.size() != bb.size():
 		return false
 	for i in aa.size():
-		if str(aa[i]) != str(bb[i]):
+		if typeof(aa[i]) != TYPE_STRING_NAME or typeof(bb[i]) != TYPE_STRING_NAME:
+			return false
+		if (aa[i] as StringName) != (bb[i] as StringName):
 			return false
 	return true
 
@@ -558,9 +589,9 @@ static func _movements_eq(a: Variant, b: Variant) -> bool:
 			return false
 		var da: Dictionary = aa[i] as Dictionary
 		var db: Dictionary = bb[i] as Dictionary
-		if not _xy_dict_eq(da.get("from", {}), db.get("from", {})):
+		if not _xy_dict_eq(da.get("from"), db.get("from")):
 			return false
-		if not _xy_dict_eq(da.get("to", {}), db.get("to", {})):
+		if not _xy_dict_eq(da.get("to"), db.get("to")):
 			return false
 	return true
 

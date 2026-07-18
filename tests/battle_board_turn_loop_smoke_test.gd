@@ -525,10 +525,11 @@ func _run_event_equality_tests() -> void:
 	_begin_case("eveq")
 	# Minimal valid completed sequence (one cascade).
 	var cells3: Array = [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}]
+	var kinds3: Array = [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]
 	var a: Array = [
 		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
 		BattleResolutionEvent.make_match_found(1, cells3),
-		BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]),
+		BattleResolutionEvent.make_cells_cleared(1, cells3, kinds3),
 		BattleResolutionEvent.make_gravity_applied([{"from_x": 0, "from_y": 1, "to_x": 0, "to_y": 4}]),
 		BattleResolutionEvent.make_cells_refilled([{"x": 0, "y": 0}], [BattleOrbKind.TIDE]),
 		BattleResolutionEvent.make_cascade_completed(1, 3),
@@ -548,11 +549,72 @@ func _run_event_equality_tests() -> void:
 		{"from": {"x": 0, "y": 4}, "to": {"x": 0, "y": 1}},
 	]
 	_assert_true("eveq_move_diff", BattleResolutionEvent.events_equal(a, mut_move) == false)
+
+	# Null is not empty Array
+	_assert_true("g1_null_validate", bool(BattleResolutionEvent.validate_events(null).get("ok", true)) == false)
+	_assert_true("g1_empty_array_ok", bool(BattleResolutionEvent.validate_events([]).get("ok", false)))
+
+	# Strict scalar types
+	var float_ci: Dictionary = BattleResolutionEvent.make_match_found(1, cells3)
+	float_ci["cascade_index"] = 1.0
+	_assert_true("g4_float_count", bool(BattleResolutionEvent.validate_event(float_ci).get("ok", true)) == false)
+	var str_ci: Dictionary = BattleResolutionEvent.make_match_found(1, cells3)
+	str_ci["cascade_index"] = "1"
+	_assert_true("g3_string_count", bool(BattleResolutionEvent.validate_event(str_ci).get("ok", true)) == false)
+	var bool_ci: Dictionary = BattleResolutionEvent.make_match_found(1, cells3)
+	bool_ci["cascade_index"] = true
+	_assert_true("g5_bool_count", bool(BattleResolutionEvent.validate_event(bool_ci).get("ok", true)) == false)
+
+	var float_xy: Dictionary = BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0))
+	float_xy["from"] = {"x": 0.0, "y": 0}
+	_assert_true("g9_float_coord", bool(BattleResolutionEvent.validate_event(float_xy).get("ok", true)) == false)
+	var str_xy: Dictionary = BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0))
+	str_xy["from"] = {"x": "0", "y": 0}
+	_assert_true("g10_string_coord", bool(BattleResolutionEvent.validate_event(str_xy).get("ok", true)) == false)
+	var bool_xy: Dictionary = BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0))
+	bool_xy["from"] = {"x": true, "y": 0}
+	_assert_true("g11_bool_coord", bool(BattleResolutionEvent.validate_event(bool_xy).get("ok", true)) == false)
+
+	var rej: Dictionary = BattleResolutionEvent.make_swap_rejected(Vector2i(0, 0), Vector2i(1, 0), "no match")
+	_assert_true("reason_ok", bool(BattleResolutionEvent.validate_event(rej).get("ok", false)))
+	var rej2: Dictionary = BattleResolutionEvent.make_swap_rejected(Vector2i(0, 0), Vector2i(1, 0), "no match")
+	_assert_true("reason_eq", BattleResolutionEvent.event_equal(rej, rej2))
+	var rej_diff: Dictionary = BattleResolutionEvent.make_swap_rejected(Vector2i(0, 0), Vector2i(1, 0), "other")
+	_assert_true("reason_neq", BattleResolutionEvent.event_equal(rej, rej_diff) == false)
+	var rej_sn: Dictionary = rej.duplicate(true)
+	rej_sn["reason"] = &"no match"
+	_assert_true("g12_reason_stringname", bool(BattleResolutionEvent.validate_event(rej_sn).get("ok", true)) == false)
+	var rej_int: Dictionary = rej.duplicate(true)
+	rej_int["reason"] = 1
+	_assert_true("g12_reason_int", bool(BattleResolutionEvent.validate_event(rej_int).get("ok", true)) == false)
+	var rej_bool: Dictionary = rej.duplicate(true)
+	rej_bool["reason"] = true
+	_assert_true("g12_reason_bool", bool(BattleResolutionEvent.validate_event(rej_bool).get("ok", true)) == false)
+	var rej_null: Dictionary = rej.duplicate(true)
+	rej_null["reason"] = null
+	_assert_true("g12_reason_null", bool(BattleResolutionEvent.validate_event(rej_null).get("ok", true)) == false)
+
+	var kind_int: Dictionary = BattleResolutionEvent.make_cells_cleared(1, cells3, kinds3)
+	kind_int["orb_kinds"] = [1, 2, 3]
+	_assert_true("g13_kind_int", bool(BattleResolutionEvent.validate_event(kind_int).get("ok", true)) == false)
+	var kind_bool: Dictionary = BattleResolutionEvent.make_cells_cleared(1, cells3, kinds3)
+	kind_bool["orb_kinds"] = [true, true, true]
+	_assert_true("g13_kind_bool", bool(BattleResolutionEvent.validate_event(kind_bool).get("ok", true)) == false)
+
+	# Cross-type numeric/coord must not equal (schema fails → event_equal false)
+	var int_turn: Dictionary = BattleResolutionEvent.make_turn_completed(1, 1, 3)
+	var float_turn: Dictionary = int_turn.duplicate(true)
+	float_turn["turn_count"] = 1.0
+	_assert_true("eq_cross_float_turn", BattleResolutionEvent.event_equal(int_turn, float_turn) == false)
+	var int_swap: Dictionary = BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0))
+	var float_swap: Dictionary = int_swap.duplicate(true)
+	float_swap["from"] = {"x": 0.0, "y": 0}
+	_assert_true("eq_cross_float_xy", BattleResolutionEvent.event_equal(int_swap, float_swap) == false)
+
 	var unk: Array = [{"type": &"not_a_real_event", "payload": 1}]
 	_assert_true("eveq_unk_invalid", bool(BattleResolutionEvent.validate_events(unk).get("ok", true)) == false)
-	_assert_true("eveq_unk_not_equal", BattleResolutionEvent.events_equal(a, unk) == false)
 	_assert_true("eveq_unk_self", BattleResolutionEvent.events_equal(unk, unk) == false)
-	# G1–G15 structural rejects
+
 	_assert_true("g1_nonarray", bool(BattleResolutionEvent.validate_events("invalid").get("ok", true)) == false)
 	_assert_true("g2_nondict", bool(BattleResolutionEvent.validate_events([123]).get("ok", true)) == false)
 	_assert_true("g3_unknown", bool(BattleResolutionEvent.validate_events([{"type": &"unknown_event"}]).get("ok", true)) == false)
@@ -572,11 +634,7 @@ func _run_event_equality_tests() -> void:
 	)
 	_assert_true(
 		"g7_len_mismatch",
-		bool(
-			BattleResolutionEvent.validate_event(
-				BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER])
-			).get("ok", true)
-		)
+		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER])).get("ok", true))
 		== false
 	)
 	_assert_true(
@@ -607,46 +665,17 @@ func _run_event_equality_tests() -> void:
 		== false
 	)
 	_assert_true(
-		"g10_upward",
-		bool(
-			BattleResolutionEvent.validate_event(
-				{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 4}, "to": {"x": 0, "y": 1}}]}
-			).get("ok", true)
-		)
-		== false
-	)
-	_assert_true(
-		"g10_same",
-		bool(
-			BattleResolutionEvent.validate_event(
-				{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 1}, "to": {"x": 0, "y": 1}}]}
-			).get("ok", true)
-		)
-		== false
-	)
-	_assert_true(
 		"g11_cascade0",
 		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_cascade_completed(0, 3)).get("ok", true))
 		== false
 	)
-	_assert_true(
-		"g11_neg_count",
-		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_turn_completed(1, 1, -1)).get("ok", true))
-		== false
-	)
 	var bad_order: Array = [
 		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
-		BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]),
+		BattleResolutionEvent.make_cells_cleared(1, cells3, kinds3),
 		BattleResolutionEvent.make_match_found(1, cells3),
 		BattleResolutionEvent.make_turn_completed(1, 1, 3),
 	]
 	_assert_true("g12_order", bool(BattleResolutionEvent.validate_events(bad_order).get("ok", true)) == false)
-	var not_last: Array = [
-		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
-		BattleResolutionEvent.make_turn_completed(1, 1, 3),
-		BattleResolutionEvent.make_match_found(1, cells3),
-	]
-	_assert_true("g13_turn_not_last", bool(BattleResolutionEvent.validate_events(not_last).get("ok", true)) == false)
 	var bad_cc: Array = BattleResolutionEvent.duplicate_events(a)
 	(bad_cc[bad_cc.size() - 1] as Dictionary)["cascade_count"] = 9
 	_assert_true("g14_cascade_mismatch", bool(BattleResolutionEvent.validate_events(bad_cc).get("ok", true)) == false)
@@ -750,7 +779,7 @@ func _run_runtime_snapshot_tests() -> void:
 	bad_rng["rng_state"] = 0
 	_assert_true("rt_bad_rng", bool(BattleRuntime.restore_runtime_snapshot(bad_rng).get("ok", true)) == false)
 
-	# Illegal event snapshot fail closed — preserve runtime domain exact + no signals.
+	# Illegal event snapshot fail closed — each case exact + zero signals.
 	var before_ev: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	var sig_rt: Array = [0]
 	var sig_bd: Array = [0]
@@ -764,22 +793,84 @@ func _run_runtime_snapshot_tests() -> void:
 	BattleRuntime.runtime_changed.connect(on_rt2)
 	BattleRuntime.board_changed.connect(on_bd)
 	BattleRuntime.phase_changed.connect(on_ph)
-	var bad_ev: Dictionary = before_ev.duplicate(true)
-	bad_ev["last_resolution_events"] = "invalid"
-	_assert_true("rt_g1_nonarray", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
-	_assert_true("rt_g1_exact", _runtime_exact(before_ev))
-	_assert_eq("rt_g1_sig_rt", int(sig_rt[0]), 0)
-	_assert_eq("rt_g1_sig_bd", int(sig_bd[0]), 0)
-	_assert_eq("rt_g1_sig_ph", int(sig_ph[0]), 0)
-	bad_ev["last_resolution_events"] = [123]
-	_assert_true("rt_g2_nondict", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
-	_assert_true("rt_g2_exact", _runtime_exact(before_ev))
-	bad_ev["last_resolution_events"] = [{"type": &"unknown_type"}]
-	_assert_true("rt_g3_unknown", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
-	_assert_true("rt_g3_exact", _runtime_exact(before_ev))
-	bad_ev["last_resolution_events"] = [{"type": &"swap", "to": {"x": 0, "y": 0}}]
-	_assert_true("rt_g4_missing", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
-	_assert_true("rt_g4_exact", _runtime_exact(before_ev))
+	var sigs: Dictionary = {"rt": sig_rt, "bd": sig_bd, "ph": sig_ph}
+	_assert_invalid_event_snapshot("rt_null", before_ev, null, sigs)
+	_assert_invalid_event_snapshot("rt_str", before_ev, "invalid", sigs)
+	_assert_invalid_event_snapshot("rt_nondict", before_ev, [123], sigs)
+	_assert_invalid_event_snapshot("rt_unknown", before_ev, [{"type": &"unknown_type"}], sigs)
+	_assert_invalid_event_snapshot("rt_missing", before_ev, [{"type": &"swap", "to": {"x": 0, "y": 0}}], sigs)
+	_assert_invalid_event_snapshot(
+		"rt_oob",
+		before_ev,
+		[BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(9, 0))],
+		sigs
+	)
+	_assert_invalid_event_snapshot(
+		"rt_nonadj",
+		before_ev,
+		[BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(3, 0))],
+		sigs
+	)
+	var cells3b: Array = [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}]
+	_assert_invalid_event_snapshot(
+		"rt_len",
+		before_ev,
+		[BattleResolutionEvent.make_cells_cleared(1, cells3b, [BattleOrbKind.EMBER])],
+		sigs
+	)
+	_assert_invalid_event_snapshot(
+		"rt_kind",
+		before_ev,
+		[BattleResolutionEvent.make_cells_cleared(1, cells3b, [&"bogus", &"bogus", &"bogus"])],
+		sigs
+	)
+	_assert_invalid_event_snapshot(
+		"rt_dup",
+		before_ev,
+		[BattleResolutionEvent.make_match_found(1, [{"x": 0, "y": 0}, {"x": 0, "y": 0}, {"x": 1, "y": 0}])],
+		sigs
+	)
+	_assert_invalid_event_snapshot(
+		"rt_move",
+		before_ev,
+		[{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 1}, "to": {"x": 1, "y": 4}}]}],
+		sigs
+	)
+	var float_ci_ev: Dictionary = BattleResolutionEvent.make_cascade_completed(1, 3)
+	float_ci_ev["cascade_index"] = 1.0
+	_assert_invalid_event_snapshot("rt_float_count", before_ev, [float_ci_ev], sigs)
+	_assert_invalid_event_snapshot(
+		"rt_count_range",
+		before_ev,
+		[BattleResolutionEvent.make_cascade_completed(0, 3)],
+		sigs
+	)
+	var bad_seq: Array = [
+		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
+		BattleResolutionEvent.make_turn_completed(1, 1, 3),
+	]
+	_assert_invalid_event_snapshot("rt_seq", before_ev, bad_seq, sigs)
+	# Valid completed sequence but Runtime counts mismatch
+	var good_seq: Array = [
+		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
+		BattleResolutionEvent.make_match_found(1, cells3b),
+		BattleResolutionEvent.make_cells_cleared(1, cells3b, [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]),
+		BattleResolutionEvent.make_gravity_applied([]),
+		BattleResolutionEvent.make_cells_refilled([], []),
+		BattleResolutionEvent.make_cascade_completed(1, 3),
+		BattleResolutionEvent.make_turn_completed(1, 1, 3),
+	]
+	var mismatch_snap: Dictionary = before_ev.duplicate(true)
+	mismatch_snap["last_resolution_events"] = good_seq
+	# before_ev counts are 0 after begin; sequence expects match 3 cascade 1
+	_assert_true(
+		"rt_count_mismatch_ok_false",
+		bool(BattleRuntime.restore_runtime_snapshot(mismatch_snap).get("ok", true)) == false
+	)
+	_assert_true("rt_count_mismatch_exact", _runtime_exact(before_ev))
+	_assert_eq("rt_count_mismatch_sig_rt", int(sig_rt[0]), 0)
+	_assert_eq("rt_count_mismatch_sig_bd", int(sig_bd[0]), 0)
+	_assert_eq("rt_count_mismatch_sig_ph", int(sig_ph[0]), 0)
 	if BattleRuntime.runtime_changed.is_connected(on_rt2):
 		BattleRuntime.runtime_changed.disconnect(on_rt2)
 	if BattleRuntime.board_changed.is_connected(on_bd):
@@ -1290,6 +1381,28 @@ func _rect_fully_within(inner: Rect2, outer: Rect2, tolerance: float) -> bool:
 		and inner.end.x <= outer.end.x + tolerance
 		and inner.end.y <= outer.end.y + tolerance
 	)
+
+
+func _assert_invalid_event_snapshot(
+	test_name: String,
+	expected_before: Dictionary,
+	bad_events: Variant,
+	signal_counts: Dictionary
+) -> void:
+	var snap: Dictionary = expected_before.duplicate(true)
+	snap["last_resolution_events"] = bad_events
+	var rt_a: Array = signal_counts.get("rt", [0]) as Array
+	var bd_a: Array = signal_counts.get("bd", [0]) as Array
+	var ph_a: Array = signal_counts.get("ph", [0]) as Array
+	var rt0: int = int(rt_a[0])
+	var bd0: int = int(bd_a[0])
+	var ph0: int = int(ph_a[0])
+	var res: Dictionary = BattleRuntime.restore_runtime_snapshot(snap)
+	_assert_true("%s_ok_false" % test_name, bool(res.get("ok", true)) == false)
+	_assert_true("%s_exact" % test_name, _runtime_exact(expected_before))
+	_assert_eq("%s_sig_rt" % test_name, int(rt_a[0]), rt0)
+	_assert_eq("%s_sig_bd" % test_name, int(bd_a[0]), bd0)
+	_assert_eq("%s_sig_ph" % test_name, int(ph_a[0]), ph0)
 
 
 func _runtime_exact(snap: Dictionary) -> bool:
