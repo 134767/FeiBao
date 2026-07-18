@@ -85,9 +85,15 @@ Corrupt files are **not** overwritten during `initialize()`.
 1. Boot calls `PlayerData.initialize()` once, then goes to Login.
 2. Login pre-fills saved name when present.
 3. User must still press **開始遊戲**.
-4. Valid name → `PlayerData.save_player_name` → then navigate Lobby.
-5. Save failure → stay on Login with user message.
-6. Navigation failure → restore prior AppState name and profile snapshot (disk write attempted).
+4. Valid name forms a **persistence transaction**:
+   - capture memory + primary/tmp/backup artifact snapshot
+   - `PlayerData.save_player_name` (save_text restores artifacts on its own write failures)
+   - navigate Lobby
+5. Save failure → stay on Login; save_text leaves no partial artifacts.
+6. Navigation failure → **complete transaction rollback** of profile, AppState, PlayerData flags, and exact primary/tmp/backup bytes.
+7. Failed candidate names must not remain on primary, temporary, or backup (and cannot reappear via backup recovery).
+8. First-login navigation failure leaves **no** save files.
+9. Prior corrupt primary bytes are restored exactly (not silently repaired).
 
 ## Character Boundary
 

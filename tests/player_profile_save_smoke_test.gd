@@ -22,7 +22,11 @@ func run_all() -> void:
 	_run_path_containment_tests()
 	_run_player_data_retry_state_tests()
 	_run_boot_login_tests()
+	_run_login_transaction_tests()
+	_run_save_failure_restore_tests()
 	_cleanup_all_cases()
+	SaveFileStore.clear_test_write_failure_step()
+	SaveFileStore.clear_test_restore_failure()
 	# Restore suite isolation path for later suites.
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
 	PlayerData.reset_runtime_state_for_tests()
@@ -692,6 +696,194 @@ func _run_boot_login_tests() -> void:
 	shell.queue_free()
 
 	print("[INFO] boot/login persistence and rollback passed")
+
+
+func _run_login_transaction_tests() -> void:
+	var login_packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
+
+	# --- existing profile + backup; failed navigation must restore all artifacts ---
+	var path_tx: String = _begin_case("tx_existing")
+	PlayerData.initialize()
+	PlayerData.save_player_name("OlderName")
+	PlayerData.save_player_name("OldName")
+	var primary: String = PlayerData.get_primary_path()
+	var snap_before: Dictionary = SaveFileStore.capture_artifact_snapshot(primary)
+	_assert_true("tx_exist_snap_ok", bool(snap_before.get("ok", false)))
+	_nav().call("reset", &"login")
+	var login: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login)
+	login.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("tx_exist_nav_fail", login.call("submit_player_name", "NewName") == false)
+	_assert_eq("tx_exist_profile", PlayerData.get_player_name(), "OldName")
+	_assert_eq("tx_exist_app", str(_app().call("get_player_name")), "OldName")
+	_assert_true("tx_exist_rollback_ok", bool(login.call("get_last_rollback_ok")))
+	_assert_true("tx_exist_disk_ok", bool(login.call("get_last_rollback_disk_ok")))
+	_assert_true("tx_exist_match", SaveFileStore.artifact_snapshot_matches(primary, snap_before))
+	var bak_text: String = _read_raw(primary + ".bak")
+	_assert_true("tx_exist_bak_not_new", bak_text.find("NewName") < 0)
+	_assert_true("tx_exist_pri_not_new", _read_raw(primary).find("NewName") < 0)
+	_write_raw(primary, "{broken")
+	PlayerData.reset_runtime_state_for_tests()
+	var init_rec: Dictionary = PlayerData.initialize()
+	_assert_eq("tx_exist_rec_state", str(init_rec.get("state", "")), "RECOVERED_BACKUP")
+	_assert_eq("tx_exist_rec_name", PlayerData.get_player_name(), "OlderName")
+	login.queue_free()
+
+	# --- first login failure leaves no files ---
+	var _path_first: String = _begin_case("tx_first")
+	PlayerData.initialize()
+	_assert_eq("tx_first_state", str(PlayerData.get_load_state()), "NEW_PROFILE")
+	_nav().call("reset", &"login")
+	var login_f: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_f)
+	login_f.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("tx_first_fail", login_f.call("submit_player_name", "FirstName") == false)
+	_assert_eq("tx_first_profile", PlayerData.get_player_name(), "")
+	_assert_eq("tx_first_rev", PlayerData.get_profile().get_revision(), 0)
+	_assert_eq("tx_first_app", str(_app().call("get_player_name")), "")
+	var p1: String = PlayerData.get_primary_path()
+	_assert_true("tx_first_no_pri", FileAccess.file_exists(p1) == false)
+	_assert_true("tx_first_no_tmp", FileAccess.file_exists(p1 + ".tmp") == false)
+	_assert_true("tx_first_no_bak", FileAccess.file_exists(p1 + ".bak") == false)
+	PlayerData.reset_runtime_state_for_tests()
+	var init_new: Dictionary = PlayerData.initialize()
+	_assert_eq("tx_first_restart", str(init_new.get("state", "")), "NEW_PROFILE")
+	login_f.queue_free()
+
+	# --- recovered backup transaction ---
+	var path_rb: String = _begin_case("tx_rec")
+	var pri_rb: String = path_rb.path_join("player_profile.json")
+	var t_rec: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("RecoveryName")
+	).get("text", ""))
+	_write_raw(pri_rb + ".bak", t_rec)
+	_write_raw(pri_rb, "{corrupt_primary_bytes")
+	PlayerData.configure_test_storage_path(path_rb)
+	PlayerData.reset_runtime_state_for_tests()
+	var init_rb: Dictionary = PlayerData.initialize()
+	_assert_eq("tx_rec_init", str(init_rb.get("state", "")), "RECOVERED_BACKUP")
+	var snap_rb: Dictionary = SaveFileStore.capture_artifact_snapshot(pri_rb)
+	_nav().call("reset", &"login")
+	var login_rb: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_rb)
+	login_rb.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("tx_rec_fail", login_rb.call("submit_player_name", "CandidateName") == false)
+	_assert_true("tx_rec_match", SaveFileStore.artifact_snapshot_matches(pri_rb, snap_rb))
+	_assert_true("tx_rec_pri_corrupt", _read_raw(pri_rb).begins_with("{corrupt"))
+	_assert_true("tx_rec_no_candidate_bak", _read_raw(pri_rb + ".bak").find("CandidateName") < 0)
+	_assert_true("tx_rec_no_candidate_pri", _read_raw(pri_rb).find("CandidateName") < 0)
+	PlayerData.reset_runtime_state_for_tests()
+	var init_rb2: Dictionary = PlayerData.initialize()
+	_assert_eq("tx_rec_reinit_state", str(init_rb2.get("state", "")), "RECOVERED_BACKUP")
+	_assert_eq("tx_rec_reinit_name", PlayerData.get_player_name(), "RecoveryName")
+	login_rb.queue_free()
+
+	# --- preexisting temporary restored ---
+	var _path_tmp: String = _begin_case("tx_tmp")
+	PlayerData.initialize()
+	PlayerData.save_player_name("TmpUser")
+	var pri_tmp: String = PlayerData.get_primary_path()
+	_write_raw(pri_tmp + ".tmp", "PREEXISTING_TMP_BYTES")
+	var snap_tmp: Dictionary = SaveFileStore.capture_artifact_snapshot(pri_tmp)
+	_nav().call("reset", &"login")
+	var login_tmp: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_tmp)
+	login_tmp.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("tx_tmp_fail", login_tmp.call("submit_player_name", "TmpCandidate") == false)
+	_assert_true("tx_tmp_match", SaveFileStore.artifact_snapshot_matches(pri_tmp, snap_tmp))
+	_assert_eq("tx_tmp_bytes", _read_raw(pri_tmp + ".tmp"), "PREEXISTING_TMP_BYTES")
+	login_tmp.queue_free()
+
+	# --- same-name transaction ---
+	var _path_same: String = _begin_case("tx_same")
+	PlayerData.initialize()
+	PlayerData.save_player_name("SameName")
+	var pri_same: String = PlayerData.get_primary_path()
+	var snap_same: Dictionary = SaveFileStore.capture_artifact_snapshot(pri_same)
+	_nav().call("reset", &"login")
+	var login_same: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_same)
+	login_same.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("tx_same_fail", login_same.call("submit_player_name", "SameName") == false)
+	_assert_true("tx_same_match", SaveFileStore.artifact_snapshot_matches(pri_same, snap_same))
+	login_same.queue_free()
+
+	# --- rollback failure observability ---
+	var _path_rf: String = _begin_case("tx_rf")
+	PlayerData.initialize()
+	PlayerData.save_player_name("RFBase")
+	_nav().call("reset", &"login")
+	var login_rf: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_rf)
+	login_rf.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	SaveFileStore.set_test_restore_failure(true)
+	_assert_true("tx_rf_fail", login_rf.call("submit_player_name", "RFNew") == false)
+	_assert_eq("tx_rf_screen", str(_nav().call("get_current_screen")), "login")
+	_assert_eq("tx_rf_profile", PlayerData.get_player_name(), "RFBase")
+	_assert_eq("tx_rf_app", str(_app().call("get_player_name")), "RFBase")
+	_assert_eq("tx_rf_state", str(PlayerData.get_load_state()), "SAVE_FAILED")
+	_assert_true("tx_rf_error", PlayerData.get_last_error().length() > 0)
+	_assert_true("tx_rf_msg", str(login_rf.call("get_validation_message")).find("無法開始") >= 0)
+	_assert_true("tx_rf_rollback_flag", bool(login_rf.call("get_last_rollback_ok")) == false)
+	SaveFileStore.clear_test_restore_failure()
+	login_rf.queue_free()
+	print("[INFO] login persistence transaction rollback passed")
+
+
+func _run_save_failure_restore_tests() -> void:
+	var validator := func(text: String) -> bool:
+		return bool(PlayerProfileCodec.parse_json_text(text).get("ok", false))
+	var good: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("Good")
+	).get("text", ""))
+	var good2: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("Good2")
+	).get("text", ""))
+
+	var c1: String = _unique_case("sf_first")
+	var p1: String = c1.path_join("player_profile.json")
+	var snap1: Dictionary = SaveFileStore.capture_artifact_snapshot(p1)
+	SaveFileStore.set_test_write_failure_step("primary_write")
+	var s1: Dictionary = SaveFileStore.save_text(p1, good, validator)
+	SaveFileStore.clear_test_write_failure_step()
+	_assert_true("sf_first_fail", bool(s1.get("ok", true)) == false)
+	_assert_true("sf_first_restore_attempted", bool(s1.get("restore_attempted", false)))
+	_assert_true("sf_first_restore_ok", bool(s1.get("restore_ok", false)))
+	_assert_true("sf_first_match", SaveFileStore.artifact_snapshot_matches(p1, snap1))
+	_assert_true("sf_first_no_tmp", FileAccess.file_exists(p1 + ".tmp") == false)
+
+	var c2: String = _unique_case("sf_exist")
+	var p2: String = c2.path_join("player_profile.json")
+	SaveFileStore.save_text(p2, good, validator)
+	SaveFileStore.save_text(p2, good2, validator)
+	var snap2: Dictionary = SaveFileStore.capture_artifact_snapshot(p2)
+	SaveFileStore.set_test_write_failure_step("primary_write")
+	var s2: Dictionary = SaveFileStore.save_text(p2, good, validator)
+	SaveFileStore.clear_test_write_failure_step()
+	_assert_true("sf_exist_fail", bool(s2.get("ok", true)) == false)
+	_assert_true("sf_exist_restore_ok", bool(s2.get("restore_ok", false)))
+	_assert_true("sf_exist_match", SaveFileStore.artifact_snapshot_matches(p2, snap2))
+
+	var c3: String = _unique_case("sf_bak")
+	var p3: String = c3.path_join("player_profile.json")
+	SaveFileStore.save_text(p3, good, validator)
+	var snap3: Dictionary = SaveFileStore.capture_artifact_snapshot(p3)
+	SaveFileStore.set_test_write_failure_step("backup_write")
+	var s3: Dictionary = SaveFileStore.save_text(p3, good2, validator)
+	SaveFileStore.clear_test_write_failure_step()
+	_assert_true("sf_bak_fail", bool(s3.get("ok", true)) == false)
+	_assert_true("sf_bak_restore_ok", bool(s3.get("restore_ok", false)))
+	_assert_true("sf_bak_match", SaveFileStore.artifact_snapshot_matches(p3, snap3))
+	_assert_true("sf_bak_no_tmp", FileAccess.file_exists(p3 + ".tmp") == false)
+
+	var wrong: Dictionary = SaveFileStore.restore_artifact_snapshot(p3, snap2)
+	_assert_true("sf_wrong_path_reject", bool(wrong.get("ok", true)) == false)
+
+	SaveFileStore.remove_test_artifacts(p1)
+	SaveFileStore.remove_test_artifacts(p2)
+	SaveFileStore.remove_test_artifacts(p3)
+	print("[INFO] save_text failure artifact restoration passed")
+
 
 func _assert_true(test_name: String, condition: bool) -> void:
 	if condition:

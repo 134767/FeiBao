@@ -7,6 +7,7 @@ const MIN_LEN: int = 1
 const MAX_LEN: int = 12
 const INTERNAL_NAV_FAIL_MSG: String = "暫時無法開始遊戲，請再試一次"
 const SAVE_FAIL_MSG: String = "無法儲存玩家資料，請再試一次"
+const ROLLBACK_FAIL_MSG: String = "玩家資料回復失敗，請再試一次"
 
 @onready var _title_label: Label = %TitleLabel
 @onready var _name_input: LineEdit = %NameInput
@@ -17,6 +18,8 @@ const SAVE_FAIL_MSG: String = "無法儲存玩家資料，請再試一次"
 var _signals_bound: bool = false
 ## Optional test hook: when valid, replaces NavigationState.navigate_to for lobby.
 var _navigate_to_lobby_override: Callable = Callable()
+var _last_rollback_ok: bool = true
+var _last_rollback_disk_ok: bool = true
 
 
 func _ready() -> void:
@@ -109,16 +112,24 @@ func clear_navigate_to_lobby_override() -> void:
 
 
 func submit_player_name(value: String) -> bool:
+	_last_rollback_ok = true
+	_last_rollback_disk_ok = true
 	var result: Dictionary = validate_player_name(value)
 	if not bool(result["valid"]):
 		_validation_label.text = str(result["error"])
 		return false
 
 	var normalized: String = str(result["normalized"])
-	var previous_name: String = AppState.get_player_name()
-	var previous_profile: PlayerProfile = PlayerData.get_profile().duplicate_profile()
+
+	# Capture full memory + primary/tmp/backup snapshot before any write.
+	var cap: Dictionary = PlayerData.capture_persistence_transaction()
+	if not bool(cap.get("ok", false)):
+		_validation_label.text = SAVE_FAIL_MSG
+		return false
+	var transaction: Dictionary = cap.get("transaction", {}) as Dictionary
 
 	# Persist first; only navigate after save succeeds.
+	# save_text itself restores artifacts on internal write failure.
 	var save_result: Dictionary = PlayerData.save_player_name(normalized)
 	if not bool(save_result.get("ok", false)):
 		_validation_label.text = SAVE_FAIL_MSG
@@ -128,11 +139,14 @@ func submit_player_name(value: String) -> bool:
 
 	var ok: bool = _navigate_to_lobby()
 	if not ok:
-		# Restore disk/profile snapshot first, then re-apply prior session name
-		# (tests may set AppState without a matching profile).
-		PlayerData.restore_profile_snapshot(previous_profile)
-		AppState.set_player_name(previous_name)
-		_validation_label.text = INTERNAL_NAV_FAIL_MSG
+		# Complete transaction rollback: profile, AppState, and all artifacts.
+		var rb: Dictionary = PlayerData.rollback_persistence_transaction(transaction)
+		_last_rollback_ok = bool(rb.get("ok", false))
+		_last_rollback_disk_ok = bool(rb.get("disk_ok", false))
+		if _last_rollback_ok and _last_rollback_disk_ok:
+			_validation_label.text = INTERNAL_NAV_FAIL_MSG
+		else:
+			_validation_label.text = "%s（%s）" % [INTERNAL_NAV_FAIL_MSG, ROLLBACK_FAIL_MSG]
 		push_error("LoginScreen: navigate_to lobby failed")
 		return false
 
@@ -157,6 +171,14 @@ func get_notice_message() -> String:
 	if _notice_label == null:
 		return ""
 	return _notice_label.text
+
+
+func get_last_rollback_ok() -> bool:
+	return _last_rollback_ok
+
+
+func get_last_rollback_disk_ok() -> bool:
+	return _last_rollback_disk_ok
 
 
 func count_primary_buttons() -> int:

@@ -11,10 +11,12 @@ const STATE_SAVE_FAILED: StringName = &"SAVE_FAILED"
 
 const PROD_DIR: String = "user://feibao"
 const PROD_PRIMARY: String = "user://feibao/player_profile.json"
+const TRANSACTION_KIND: String = "player_persistence_transaction_v1"
 
 const NOTICE_RECOVERED: String = "已從備份還原玩家資料"
 const NOTICE_CORRUPT: String = "玩家資料損壞，已使用安全預設（尚未覆蓋原檔）"
 const ERR_SAVE_FAILED: String = "無法儲存玩家資料，請再試一次"
+const ERR_TX_ROLLBACK: String = "transaction rollback failure"
 
 var _initialized: bool = false
 var _profile: PlayerProfile = null
@@ -27,7 +29,6 @@ var _last_save_wrote_disk: bool = false
 
 
 func _ready() -> void:
-	# Lazy initialize from BootScreen; keep default empty until then.
 	_profile = PlayerProfile.create_default()
 	_load_state = STATE_UNINITIALIZED
 
@@ -45,7 +46,6 @@ func get_primary_path() -> String:
 func configure_test_storage_path(path: String) -> bool:
 	var check: Dictionary = SaveFileStore.normalize_test_storage_dir(path)
 	if not bool(check.get("ok", false)):
-		# Do not change existing configuration on rejection.
 		return false
 	_test_storage_dir = str(check.get("path", ""))
 	return true
@@ -67,6 +67,8 @@ func reset_runtime_state_for_tests() -> void:
 	_user_notice = ""
 	_save_override = Callable()
 	_last_save_wrote_disk = false
+	SaveFileStore.clear_test_write_failure_step()
+	SaveFileStore.clear_test_restore_failure()
 
 
 func set_save_override_for_tests(callback: Callable) -> void:
@@ -109,7 +111,6 @@ func initialize() -> Dictionary:
 		_initialized = true
 		return _status_dict()
 
-	# CORRUPT or unreadable: keep files, use safe default in memory only.
 	_profile = PlayerProfile.create_default()
 	_load_state = STATE_SAFE_DEFAULT_CORRUPT
 	_last_error = str(load_result.get("error", "corrupt save"))
@@ -206,7 +207,6 @@ func save_player_name(value: String) -> Dictionary:
 	if not bool(save_result.get("ok", false)):
 		_load_state = STATE_SAVE_FAILED
 		_last_error = str(save_result.get("error", "save failed"))
-		# Preserve current profile and AppState.
 		return {
 			"ok": false,
 			"changed": false,
@@ -228,36 +228,72 @@ func save_player_name(value: String) -> Dictionary:
 	}
 
 
-## Restore a prior snapshot and attempt to write it back to disk (navigation rollback).
-func restore_profile_snapshot(snapshot: PlayerProfile) -> Dictionary:
-	if snapshot == null:
-		return {"ok": false, "error": "null snapshot", "disk_ok": false}
-	var previous_current: PlayerProfile = get_profile()
-	_profile = snapshot.duplicate_profile()
-	AppState.set_player_name(_profile.get_player_name())
+## Capture full memory + artifact snapshot before a login persistence transaction.
+func capture_persistence_transaction() -> Dictionary:
+	if not _initialized:
+		initialize()
+	var storage: Dictionary = SaveFileStore.capture_artifact_snapshot(get_primary_path())
+	if not bool(storage.get("ok", false)):
+		return {
+			"ok": false,
+			"transaction": {},
+			"error": "storage snapshot failed: %s" % str(storage.get("error", "")),
+		}
+	var tx: Dictionary = {
+		"transaction_kind": TRANSACTION_KIND,
+		"profile": get_profile().duplicate_profile(),
+		"app_state_player_name": AppState.get_player_name(),
+		"load_state": _load_state,
+		"last_error": _last_error,
+		"user_notice": _user_notice,
+		"last_save_wrote_disk": _last_save_wrote_disk,
+		"storage_snapshot": storage,
+		"primary_path": get_primary_path(),
+	}
+	return {"ok": true, "transaction": tx, "error": ""}
 
-	var encoded: Dictionary = PlayerProfileCodec.encode_profile(_profile)
-	if not bool(encoded.get("ok", false)):
-		_last_error = "rollback encode failed"
-		return {"ok": false, "error": _last_error, "disk_ok": false}
 
-	var disk: Dictionary
-	if _save_override.is_valid():
-		disk = _save_override.call(get_primary_path(), str(encoded.get("text", "")))
+## Complete rollback of profile, AppState, PlayerData flags, and primary/tmp/backup bytes.
+func rollback_persistence_transaction(transaction: Dictionary) -> Dictionary:
+	if str(transaction.get("transaction_kind", "")) != TRANSACTION_KIND:
+		return {"ok": false, "disk_ok": false, "error": "invalid transaction_kind"}
+	var primary: String = get_primary_path()
+	if str(transaction.get("primary_path", "")) != primary:
+		return {"ok": false, "disk_ok": false, "error": "transaction primary_path mismatch"}
+	var storage_snapshot: Dictionary = transaction.get("storage_snapshot", {}) as Dictionary
+	var disk: Dictionary = SaveFileStore.restore_artifact_snapshot(primary, storage_snapshot)
+
+	var prior_profile: PlayerProfile = transaction.get("profile") as PlayerProfile
+	if prior_profile != null:
+		_profile = prior_profile.duplicate_profile()
 	else:
-		disk = SaveFileStore.save_text(
-			get_primary_path(),
-			str(encoded.get("text", "")),
-			Callable(self, "_validate_profile_text")
-		)
+		_profile = PlayerProfile.create_default()
+	AppState.set_player_name(str(transaction.get("app_state_player_name", "")))
+	_user_notice = str(transaction.get("user_notice", ""))
+	_last_save_wrote_disk = bool(transaction.get("last_save_wrote_disk", false))
+
 	if not bool(disk.get("ok", false)):
 		_load_state = STATE_SAVE_FAILED
-		_last_error = "rollback disk write failed: %s" % str(disk.get("error", ""))
-		return {"ok": true, "error": _last_error, "disk_ok": false}
+		_last_error = "%s: %s" % [ERR_TX_ROLLBACK, str(disk.get("error", ""))]
+		return {
+			"ok": false,
+			"disk_ok": false,
+			"error": _last_error,
+		}
 
-	_last_error = ""
-	_load_state = STATE_LOADED_PRIMARY
-	return {"ok": true, "error": "", "disk_ok": true}
+	_load_state = transaction.get("load_state", STATE_UNINITIALIZED) as StringName
+	_last_error = str(transaction.get("last_error", ""))
+	return {"ok": true, "disk_ok": true, "error": ""}
+
+
+## Deprecated unsafe path: must not be used for navigation rollback.
+## Kept as explicit failure to prevent accidental ordinary-save rollback.
+func restore_profile_snapshot(_snapshot: PlayerProfile) -> Dictionary:
+	return {
+		"ok": false,
+		"disk_ok": false,
+		"error": "unsafe restore_profile_snapshot disabled; use rollback_persistence_transaction",
+	}
 
 
 func cleanup_test_artifacts() -> Dictionary:

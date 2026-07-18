@@ -13,8 +13,16 @@ const FILE_VALID: String = "VALID"
 const FILE_INVALID: String = "INVALID"
 const FILE_UNREADABLE: String = "UNREADABLE"
 
+const SNAPSHOT_KIND: String = "save_artifact_snapshot_v1"
+
 const TEST_ROOT_VIRTUAL: String = "user://feibao_tests"
 const TEST_ROOT_PREFIX: String = "user://feibao_tests/"
+
+## Tests-only write failure seam. Empty = production default (never fail).
+## Allowed: "tmp_write" | "backup_write" | "primary_write"
+static var _test_write_fail_step: String = ""
+## Tests-only restore failure seam for observability.
+static var _test_restore_fail: bool = false
 
 
 static func temporary_path_for(primary_path: String) -> String:
@@ -23,6 +31,22 @@ static func temporary_path_for(primary_path: String) -> String:
 
 static func backup_path_for(primary_path: String) -> String:
 	return primary_path + ".bak"
+
+
+static func set_test_write_failure_step(step: String) -> void:
+	_test_write_fail_step = step
+
+
+static func clear_test_write_failure_step() -> void:
+	_test_write_fail_step = ""
+
+
+static func set_test_restore_failure(enabled: bool) -> void:
+	_test_restore_fail = enabled
+
+
+static func clear_test_restore_failure() -> void:
+	_test_restore_fail = false
 
 
 ## Classify an existing file using the caller-provided validator (no schema knowledge).
@@ -74,11 +98,101 @@ static func load_text(primary_path: String, validator: Callable) -> Dictionary:
 	return _load_fail(SOURCE_CORRUPT, "primary and backup both unavailable or invalid")
 
 
+static func capture_artifact_snapshot(primary_path: String) -> Dictionary:
+	if primary_path.is_empty():
+		return {"ok": false, "error": "primary path is empty", "snapshot_kind": SNAPSHOT_KIND}
+	var keys: PackedStringArray = PackedStringArray(["primary", "temporary", "backup"])
+	var paths: Dictionary = {
+		"primary": primary_path,
+		"temporary": temporary_path_for(primary_path),
+		"backup": backup_path_for(primary_path),
+	}
+	var artifacts: Dictionary = {}
+	for key in keys:
+		var path: String = str(paths[key])
+		var art: Dictionary = _capture_one_artifact(path)
+		if not bool(art.get("ok", false)):
+			return {
+				"ok": false,
+				"error": "unreadable artifact: %s" % key,
+				"snapshot_kind": SNAPSHOT_KIND,
+				"primary_path": primary_path,
+			}
+		artifacts[key] = art.get("data", {})
+	return {
+		"ok": true,
+		"snapshot_kind": SNAPSHOT_KIND,
+		"primary_path": primary_path,
+		"artifacts": artifacts,
+		"error": "",
+	}
+
+
+static func restore_artifact_snapshot(primary_path: String, snapshot: Dictionary) -> Dictionary:
+	if _test_restore_fail:
+		return {"ok": false, "error": "test-forced restore failure"}
+	if primary_path.is_empty():
+		return {"ok": false, "error": "primary path is empty"}
+	if str(snapshot.get("snapshot_kind", "")) != SNAPSHOT_KIND:
+		return {"ok": false, "error": "invalid snapshot_kind"}
+	if str(snapshot.get("primary_path", "")) != primary_path:
+		return {"ok": false, "error": "snapshot primary_path mismatch"}
+	var artifacts: Variant = snapshot.get("artifacts", {})
+	if typeof(artifacts) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "snapshot artifacts missing"}
+	var art: Dictionary = artifacts as Dictionary
+	var mapping: Dictionary = {
+		"primary": primary_path,
+		"temporary": temporary_path_for(primary_path),
+		"backup": backup_path_for(primary_path),
+	}
+	for key in mapping.keys():
+		if not art.has(key):
+			return {"ok": false, "error": "missing artifact entry: %s" % str(key)}
+		var entry: Dictionary = art[key] as Dictionary
+		var path: String = str(mapping[key])
+		var restored: Dictionary = _restore_one_artifact(path, entry)
+		if not bool(restored.get("ok", false)):
+			return {"ok": false, "error": "failed restoring %s: %s" % [str(key), str(restored.get("error", ""))]}
+	if not artifact_snapshot_matches(primary_path, snapshot):
+		return {"ok": false, "error": "post-restore snapshot mismatch"}
+	return {"ok": true, "error": ""}
+
+
+static func artifact_snapshot_matches(primary_path: String, snapshot: Dictionary) -> bool:
+	if str(snapshot.get("snapshot_kind", "")) != SNAPSHOT_KIND:
+		return false
+	if str(snapshot.get("primary_path", "")) != primary_path:
+		return false
+	var current: Dictionary = capture_artifact_snapshot(primary_path)
+	if not bool(current.get("ok", false)):
+		return false
+	var cur_art: Dictionary = current.get("artifacts", {}) as Dictionary
+	var snap_art: Dictionary = snapshot.get("artifacts", {}) as Dictionary
+	for key in ["primary", "temporary", "backup"]:
+		var a: Dictionary = snap_art.get(key, {}) as Dictionary
+		var b: Dictionary = cur_art.get(key, {}) as Dictionary
+		if bool(a.get("exists", false)) != bool(b.get("exists", false)):
+			return false
+		if bool(a.get("exists", false)):
+			if str(a.get("sha256", "")) != str(b.get("sha256", "")):
+				return false
+			if int(a.get("length", -1)) != int(b.get("length", -2)):
+				return false
+			if str(a.get("text", "")) != str(b.get("text", "")):
+				return false
+	return true
+
+
 static func save_text(primary_path: String, text: String, validator: Callable) -> Dictionary:
 	if primary_path.is_empty():
 		return _save_fail("primary path is empty")
 	if text.is_empty():
 		return _save_fail("text is empty")
+
+	var pre_snap: Dictionary = capture_artifact_snapshot(primary_path)
+	if not bool(pre_snap.get("ok", false)):
+		return _save_fail("cannot capture pre-write artifact snapshot: %s" % str(pre_snap.get("error", "")))
 
 	var backup_path: String = backup_path_for(primary_path)
 	var tmp_path: String = temporary_path_for(primary_path)
@@ -89,77 +203,45 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 	var pstate: String = str(primary_info.get("state", FILE_MISSING))
 	var bstate: String = str(backup_info.get("state", FILE_MISSING))
 	var primary_bytes: String = str(primary_info.get("text", ""))
-	var backup_bytes: String = str(backup_info.get("text", ""))
 
 	# Fail-closed when no validated recovery source can be preserved/used.
 	if pstate != FILE_VALID and bstate != FILE_VALID and not (pstate == FILE_MISSING and bstate == FILE_MISSING):
-		# invalid/unreadable primary and/or backup without a VALID peer → do not touch files
 		return _save_fail_full(
 			"no validated recovery source; refusing to overwrite invalid artifacts",
 			false,
 			true if bstate == FILE_VALID else false,
 			pstate,
-			bstate
+			bstate,
+			false,
+			false
 		)
 
 	var dir_path: String = primary_path.get_base_dir()
 	if not dir_path.is_empty() and not _ensure_dir(dir_path):
-		return _save_fail_full("cannot create parent directory", false, false, pstate, bstate)
+		return _fail_and_restore(pre_snap, primary_path, "cannot create parent directory", pstate, bstate)
 
-	if not _write_all(tmp_path, text):
-		_safe_remove(tmp_path)
-		return _save_fail_full("failed to write temporary file", false, false, pstate, bstate)
+	if _test_write_fail_step == "tmp_write" or not _write_all(tmp_path, text):
+		return _fail_and_restore(pre_snap, primary_path, "failed to write temporary file", pstate, bstate)
 
 	var tmp_read: String = _read_all(tmp_path)
 	if not _is_valid_text(tmp_read, validator):
-		_safe_remove(tmp_path)
-		return _save_fail_full("temporary validation failed; sources untouched", false, false, pstate, bstate)
+		return _fail_and_restore(pre_snap, primary_path, "temporary validation failed; sources untouched", pstate, bstate)
 
 	var backup_created: bool = false
 	var backup_preserved: bool = false
 
 	if pstate == FILE_VALID:
-		# Only a validated primary may become the new backup.
-		if not _write_all(backup_path, primary_bytes):
-			_safe_remove(tmp_path)
-			return _save_fail_full("failed to write backup from validated primary", false, false, pstate, bstate)
+		if _test_write_fail_step == "backup_write" or not _write_all(backup_path, primary_bytes):
+			return _fail_and_restore(pre_snap, primary_path, "failed to write backup from validated primary", pstate, bstate)
 		var bak_check: Dictionary = classify_file(backup_path, validator)
 		if str(bak_check.get("state", "")) != FILE_VALID:
-			# Restore previous backup bytes if we had any readable content.
-			if bstate == FILE_VALID:
-				_write_all(backup_path, backup_bytes)
-			_safe_remove(tmp_path)
-			return _save_fail_full("backup revalidation failed; primary untouched", false, false, pstate, bstate)
+			return _fail_and_restore(pre_snap, primary_path, "backup revalidation failed; primary untouched", pstate, bstate)
 		backup_created = true
 	elif bstate == FILE_VALID:
-		# Keep legal backup byte-for-byte; never copy invalid primary onto it.
 		backup_preserved = true
-	# first save (missing/missing): no backup yet
 
-	if not _write_all(primary_path, tmp_read):
-		var restored: bool = false
-		if pstate == FILE_VALID:
-			# Prefer restoring original primary content.
-			if _write_all(primary_path, primary_bytes):
-				restored = true
-			elif bstate == FILE_VALID or backup_created:
-				if _write_all(primary_path, backup_bytes if bstate == FILE_VALID else primary_bytes):
-					restored = true
-		elif bstate == FILE_VALID:
-			# Do not leave a truncated primary if we can restore from backup.
-			if _write_all(primary_path, backup_bytes):
-				restored = true
-		_safe_remove(tmp_path)
-		return {
-			"ok": false,
-			"backup_created": backup_created,
-			"backup_preserved": backup_preserved,
-			"previous_primary_state": pstate,
-			"previous_backup_state": bstate,
-			"restore_attempted": true,
-			"restore_ok": restored,
-			"error": "failed to replace primary",
-		}
+	if _test_write_fail_step == "primary_write" or not _write_all(primary_path, tmp_read):
+		return _fail_and_restore(pre_snap, primary_path, "failed to replace primary", pstate, bstate, backup_created, backup_preserved)
 
 	_safe_remove(tmp_path)
 	return {
@@ -168,12 +250,13 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 		"backup_preserved": backup_preserved,
 		"previous_primary_state": pstate,
 		"previous_backup_state": bstate,
+		"restore_attempted": false,
+		"restore_ok": false,
 		"error": "",
 	}
 
 
 ## Normalize and validate a test storage directory under user://feibao_tests/.
-## Uses simplified path + globalized boundary checks (not string prefix alone).
 static func normalize_test_storage_dir(path: String) -> Dictionary:
 	if path.is_empty():
 		return {"ok": false, "path": "", "error": "empty path"}
@@ -195,7 +278,6 @@ static func normalize_test_storage_dir(path: String) -> Dictionary:
 	if normalized == TEST_ROOT_VIRTUAL:
 		return {"ok": false, "path": "", "error": "test root itself is not a case path"}
 
-	# Reject lookalike prefixes (e.g. user://feibao_tests_case) and escapes after simplify.
 	if not normalized.begins_with(TEST_ROOT_PREFIX):
 		return {"ok": false, "path": "", "error": "path not under user://feibao_tests/"}
 
@@ -203,7 +285,6 @@ static func normalize_test_storage_dir(path: String) -> Dictionary:
 	if relative.is_empty() or relative.contains(".."):
 		return {"ok": false, "path": "", "error": "path escapes test root"}
 
-	# Globalized boundary check: must remain under globalized test root.
 	var global_root: String = ProjectSettings.globalize_path(TEST_ROOT_VIRTUAL).replace("\\", "/")
 	var global_path: String = ProjectSettings.globalize_path(normalized).replace("\\", "/")
 	global_root = global_root.simplify_path().rstrip("/")
@@ -218,11 +299,11 @@ static func normalize_test_storage_dir(path: String) -> Dictionary:
 
 	return {"ok": true, "path": normalized, "error": ""}
 
+
 static func is_valid_test_storage_dir(path: String) -> bool:
 	return bool(normalize_test_storage_dir(path).get("ok", false))
 
 
-## Removes only primary/tmp/backup for a contained test primary path.
 static func remove_test_artifacts(primary_path: String) -> Dictionary:
 	if primary_path.is_empty():
 		return {"ok": false, "error": "empty path"}
@@ -230,11 +311,9 @@ static func remove_test_artifacts(primary_path: String) -> Dictionary:
 	var check: Dictionary = normalize_test_storage_dir(dir)
 	if not bool(check.get("ok", false)):
 		return {"ok": false, "error": "refusing cleanup outside contained test path"}
-	# Ensure primary itself is the expected filename under that dir.
 	var expected: String = str(check.get("path", "")).path_join("player_profile.json")
 	var norm_primary: String = primary_path.replace("\\", "/").simplify_path()
 	if norm_primary != expected and not norm_primary.ends_with("/player_profile.json"):
-		# Allow explicit primary under validated dir.
 		var parent_ok: Dictionary = normalize_test_storage_dir(norm_primary.get_base_dir())
 		if not bool(parent_ok.get("ok", false)):
 			return {"ok": false, "error": "primary not under contained test dir"}
@@ -242,6 +321,94 @@ static func remove_test_artifacts(primary_path: String) -> Dictionary:
 	_safe_remove(temporary_path_for(primary_path))
 	_safe_remove(backup_path_for(primary_path))
 	return {"ok": true, "error": ""}
+
+
+static func _capture_one_artifact(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {
+			"ok": true,
+			"data": {
+				"exists": false,
+				"readable": false,
+				"text": "",
+				"sha256": "",
+				"length": -1,
+			},
+		}
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {"ok": false, "error": "unreadable"}
+	var text: String = f.get_as_text()
+	var err: Error = f.get_error()
+	f.close()
+	if err != OK and err != ERR_FILE_EOF:
+		return {"ok": false, "error": "read error"}
+	var bytes: PackedByteArray = text.to_utf8_buffer()
+	return {
+		"ok": true,
+		"data": {
+			"exists": true,
+			"readable": true,
+			"text": text,
+			"sha256": _sha256_bytes(bytes),
+			"length": bytes.size(),
+		},
+	}
+
+
+static func _restore_one_artifact(path: String, entry: Dictionary) -> Dictionary:
+	var exists: bool = bool(entry.get("exists", false))
+	if not exists:
+		_safe_remove(path)
+		if FileAccess.file_exists(path):
+			return {"ok": false, "error": "could not remove artifact"}
+		return {"ok": true, "error": ""}
+	if not bool(entry.get("readable", false)):
+		return {"ok": false, "error": "snapshot entry not readable"}
+	var text: String = str(entry.get("text", ""))
+	var dir: String = path.get_base_dir()
+	if not dir.is_empty() and not _ensure_dir(dir):
+		return {"ok": false, "error": "cannot ensure directory"}
+	if not _write_all(path, text):
+		return {"ok": false, "error": "write failed"}
+	var verify: Dictionary = _capture_one_artifact(path)
+	if not bool(verify.get("ok", false)):
+		return {"ok": false, "error": "post-write unreadable"}
+	var data: Dictionary = verify.get("data", {}) as Dictionary
+	if str(data.get("sha256", "")) != str(entry.get("sha256", "")):
+		return {"ok": false, "error": "sha mismatch after restore"}
+	if int(data.get("length", -1)) != int(entry.get("length", -2)):
+		return {"ok": false, "error": "length mismatch after restore"}
+	return {"ok": true, "error": ""}
+
+
+static func _fail_and_restore(
+	pre_snap: Dictionary,
+	primary_path: String,
+	error: String,
+	pstate: String,
+	bstate: String,
+	backup_created: bool = false,
+	backup_preserved: bool = false
+) -> Dictionary:
+	var restore: Dictionary = restore_artifact_snapshot(primary_path, pre_snap)
+	return {
+		"ok": false,
+		"backup_created": backup_created,
+		"backup_preserved": backup_preserved,
+		"previous_primary_state": pstate,
+		"previous_backup_state": bstate,
+		"restore_attempted": true,
+		"restore_ok": bool(restore.get("ok", false)),
+		"error": error if bool(restore.get("ok", false)) else "%s; restore failed: %s" % [error, str(restore.get("error", ""))],
+	}
+
+
+static func _sha256_bytes(bytes: PackedByteArray) -> String:
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(bytes)
+	return ctx.finish().hex_encode()
 
 
 static func _is_valid_text(text: String, validator: Callable) -> bool:
@@ -278,7 +445,6 @@ static func _write_all(path: String, text: String) -> bool:
 	f.close()
 	if err != OK and err != ERR_FILE_EOF:
 		return false
-	# Confirm bytes readable back match expected length at least.
 	if not FileAccess.file_exists(path):
 		return false
 	var verify: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -325,7 +491,7 @@ static func _load_fail(source: String, error: String) -> Dictionary:
 
 
 static func _save_fail(error: String) -> Dictionary:
-	return _save_fail_full(error, false, false, "", "")
+	return _save_fail_full(error, false, false, "", "", false, false)
 
 
 static func _save_fail_full(
@@ -333,7 +499,9 @@ static func _save_fail_full(
 	backup_created: bool,
 	backup_preserved: bool,
 	pstate: String,
-	bstate: String
+	bstate: String,
+	restore_attempted: bool = false,
+	restore_ok: bool = false
 ) -> Dictionary:
 	return {
 		"ok": false,
@@ -341,5 +509,7 @@ static func _save_fail_full(
 		"backup_preserved": backup_preserved,
 		"previous_primary_state": pstate,
 		"previous_backup_state": bstate,
+		"restore_attempted": restore_attempted,
+		"restore_ok": restore_ok,
 		"error": error,
 	}

@@ -53,6 +53,8 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 - Corrupt primary may recover from backup; both corrupt → safe default, files kept.
 - Only a **validated** primary may refresh backup; invalid primary never overwrites a valid backup.
 - Saves with no validated recovery source fail closed (sources unchanged).
+- Login name save + Lobby navigation is a **persistence transaction** with full primary/tmp/backup snapshot rollback on navigation failure.
+- Failed login candidates never remain recoverable via backup.
 - Test paths use canonical containment under `user://feibao_tests/`; production fingerprints must stay unchanged.
 - No auto-login; no cloud; no encryption / absolute atomic claims.
 
