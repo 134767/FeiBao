@@ -46,13 +46,18 @@ Default ownership: only `feibao_dev` owned and selected.
 
 `SaveFileStore` performs a **staged recoverable write** (not a claim of absolute cross-platform atomic write):
 
-1. Ensure parent directory exists.
-2. Write temporary file and flush/close.
-3. Re-read temporary and validate with codec.
-4. If validation fails, delete temporary and **leave primary untouched**.
-5. If primary exists, copy it to backup.
-6. Replace primary with validated content.
-7. Remove temporary.
+1. **Classify** existing primary/backup as MISSING / VALID / INVALID / UNREADABLE via the validator.
+2. Ensure parent directory exists.
+3. Write temporary file, flush/close, and check write errors.
+4. Re-read temporary and validate with codec.
+5. If validation fails, delete temporary and **leave all sources untouched**.
+6. **Backup policy:** only a **validated primary** may update backup; invalid primary **never** overwrites a legal backup.
+7. When primary is invalid but backup is valid, preserve backup byte-for-byte and still allow writing a new primary.
+8. When there is **no** VALID recovery source (e.g. both corrupt), save **fail-closed** and does not modify files.
+9. Replace primary with validated temporary content; on failure attempt restore.
+10. Remove temporary on all paths.
+
+Recovery after load still never deletes corrupt sources during `initialize()`.
 
 ## Load / Recovery
 
@@ -96,4 +101,8 @@ No auto-login, cloud sync, encryption, anti-cheat, multi-slot UI, unlock UX, com
 
 ## Testing Isolation
 
-Automated tests use `user://feibao_tests/<case>/` only and must not touch `user://feibao/player_profile.json`.
+- Automated tests use contained paths under `user://feibao_tests/<case>/`.
+- Path validation uses **canonical / simplified containment** (not mere string prefix): rejects `../` traversal and lookalike roots such as `user://feibao_tests_case`.
+- Cleanup may only delete a case’s primary / `.tmp` / `.bak` (no recursive deletes of parent trees).
+- Production artifacts under `user://feibao/` may **pre-exist**; tests fingerprint (exists + SHA-256 + length) before/after and must remain unchanged.
+- Tests must not create or repair production saves.

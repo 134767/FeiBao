@@ -51,7 +51,10 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 - Paths: `user://feibao/player_profile.json` (+ `.tmp` / `.bak`)
 - Missing save is normal first run (memory default, no boot write).
 - Corrupt primary may recover from backup; both corrupt → safe default, files kept.
-- No auto-login; no cloud; no encryption claims.
+- Only a **validated** primary may refresh backup; invalid primary never overwrites a valid backup.
+- Saves with no validated recovery source fail closed (sources unchanged).
+- Test paths use canonical containment under `user://feibao_tests/`; production fingerprints must stay unchanged.
+- No auto-login; no cloud; no encryption / absolute atomic claims.
 
 See `docs/FEIBAO_0.5.0_LOCAL_PLAYER_SAVE.md`.
 

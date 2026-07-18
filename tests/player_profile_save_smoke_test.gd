@@ -13,15 +13,22 @@ func setup(tree: SceneTree) -> void:
 
 
 func run_all() -> void:
+	var prod_before: Dictionary = _snapshot_production_artifacts()
 	_run_profile_tests()
 	_run_codec_tests()
 	_run_store_tests()
+	_run_backup_preservation_tests()
 	_run_player_data_tests()
+	_run_path_containment_tests()
+	_run_player_data_retry_state_tests()
 	_run_boot_login_tests()
 	_cleanup_all_cases()
 	# Restore suite isolation path for later suites.
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
 	PlayerData.reset_runtime_state_for_tests()
+	var prod_after: Dictionary = _snapshot_production_artifacts()
+	_assert_production_fingerprints_unchanged(prod_before, prod_after)
+	print("[INFO] production fingerprints unchanged")
 
 
 func _pd() -> Node:
@@ -61,8 +68,51 @@ func _cleanup_all_cases() -> void:
 	PlayerData.reset_runtime_state_for_tests()
 
 
-func _prod_untouched() -> bool:
-	return not FileAccess.file_exists("user://feibao/player_profile.json")
+func _prod_paths() -> PackedStringArray:
+	return PackedStringArray([
+		"user://feibao/player_profile.json",
+		"user://feibao/player_profile.json.tmp",
+		"user://feibao/player_profile.json.bak",
+	])
+
+
+func _snapshot_production_artifacts() -> Dictionary:
+	var snap: Dictionary = {}
+	for path in _prod_paths():
+		snap[path] = _file_fingerprint(path)
+	return snap
+
+
+func _file_fingerprint(path: String) -> Dictionary:
+	var exists: bool = FileAccess.file_exists(path)
+	if not exists:
+		return {"exists": false, "sha256": "", "length": -1}
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {"exists": true, "sha256": "UNREADABLE", "length": -1}
+	var bytes: PackedByteArray = f.get_buffer(f.get_length())
+	var length: int = bytes.size()
+	f.close()
+	var sha: String = bytes.hex_encode() # length evidence companion; also hash below
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(bytes)
+	var digest: PackedByteArray = ctx.finish()
+	return {
+		"exists": true,
+		"sha256": digest.hex_encode(),
+		"length": length,
+		"raw_hex_len": sha.length(),
+	}
+
+
+func _assert_production_fingerprints_unchanged(before: Dictionary, after: Dictionary) -> void:
+	for path in _prod_paths():
+		var b: Dictionary = before.get(path, {}) as Dictionary
+		var a: Dictionary = after.get(path, {}) as Dictionary
+		_assert_eq("prod_fp_exists_%s" % path.get_file(), bool(b.get("exists", false)), bool(a.get("exists", false)))
+		_assert_eq("prod_fp_sha_%s" % path.get_file(), str(b.get("sha256", "")), str(a.get("sha256", "")))
+		_assert_eq("prod_fp_len_%s" % path.get_file(), int(b.get("length", -2)), int(a.get("length", -3)))
 
 
 func _run_profile_tests() -> void:
@@ -250,8 +300,130 @@ func _run_store_tests() -> void:
 	_assert_true("store_cleanup_ok", bool(clean.get("ok", false)))
 	_assert_true("store_cleanup_primary_gone", FileAccess.file_exists(primary) == false)
 	SaveFileStore.remove_test_artifacts(good_primary)
-	_assert_true("store_prod_untouched", _prod_untouched())
 	print("[INFO] save file store staged write and recovery passed")
+
+
+func _run_backup_preservation_tests() -> void:
+	var validator := func(text: String) -> bool:
+		return bool(PlayerProfileCodec.parse_json_text(text).get("ok", false))
+
+	# corrupt primary + valid backup → recover, then save preserves backup hash
+	var case1: String = _unique_case("bak_preserve")
+	var primary1: String = case1.path_join("player_profile.json")
+	var bak1: String = primary1 + ".bak"
+	var t_old: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("OldBak")
+	).get("text", ""))
+	var t_new: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("NewPri")
+	).get("text", ""))
+	# Establish valid backup via two saves first
+	SaveFileStore.save_text(primary1, t_old, validator)
+	SaveFileStore.save_text(primary1, t_new, validator)
+	# Now backup should be previous primary (OldBak chain). Re-seed known backup content.
+	_write_raw(bak1, t_old)
+	_write_raw(primary1, "{broken")
+	var rec: Dictionary = SaveFileStore.load_text(primary1, validator)
+	_assert_true("bak_rec_ok", bool(rec.get("ok", false)))
+	_assert_true("bak_rec_flag", bool(rec.get("recovered_from_backup", false)))
+	var bak_fp_before: Dictionary = _file_fingerprint(bak1)
+	var save_after: Dictionary = SaveFileStore.save_text(primary1, t_new, validator)
+	_assert_true("bak_rec_save_ok", bool(save_after.get("ok", false)))
+	_assert_true("bak_rec_preserved_flag", bool(save_after.get("backup_preserved", false)))
+	var bak_fp_after: Dictionary = _file_fingerprint(bak1)
+	_assert_eq("bak_rec_hash_same", str(bak_fp_before.get("sha256", "")), str(bak_fp_after.get("sha256", "")))
+	_assert_eq("bak_rec_len_same", int(bak_fp_before.get("length", -1)), int(bak_fp_after.get("length", -2)))
+	var pri_load: Dictionary = SaveFileStore.load_text(primary1, validator)
+	_assert_true("bak_rec_new_primary", bool(pri_load.get("ok", false)))
+	var pri_prof: PlayerProfile = PlayerProfileCodec.parse_json_text(str(pri_load.get("text", ""))).get("profile")
+	_assert_eq("bak_rec_new_name", pri_prof.get_player_name() if pri_prof else "", "NewPri")
+	var bak_text: String = _read_raw(bak1)
+	var bak_parse: Dictionary = PlayerProfileCodec.parse_json_text(bak_text)
+	_assert_true("bak_still_parses", bool(bak_parse.get("ok", false)))
+	var bak_prof: PlayerProfile = bak_parse.get("profile") as PlayerProfile
+	_assert_eq("bak_still_old_name", bak_prof.get_player_name() if bak_prof else "", "OldBak")
+	_assert_true("bak_rec_no_tmp", FileAccess.file_exists(primary1 + ".tmp") == false)
+
+	# missing primary + valid backup
+	var case2: String = _unique_case("miss_pri")
+	var primary2: String = case2.path_join("player_profile.json")
+	var bak2: String = primary2 + ".bak"
+	_write_raw(bak2, t_old)
+	var bak2_before: Dictionary = _file_fingerprint(bak2)
+	var save_miss: Dictionary = SaveFileStore.save_text(primary2, t_new, validator)
+	_assert_true("miss_pri_save_ok", bool(save_miss.get("ok", false)))
+	var bak2_after: Dictionary = _file_fingerprint(bak2)
+	_assert_eq("miss_pri_bak_hash", str(bak2_before.get("sha256")), str(bak2_after.get("sha256")))
+
+	# valid primary + corrupt backup → backup repaired from valid primary
+	var case3: String = _unique_case("fix_bak")
+	var primary3: String = case3.path_join("player_profile.json")
+	SaveFileStore.save_text(primary3, t_old, validator)
+	_write_raw(primary3 + ".bak", "{badbak")
+	var save_fix: Dictionary = SaveFileStore.save_text(primary3, t_new, validator)
+	_assert_true("fix_bak_save_ok", bool(save_fix.get("ok", false)))
+	_assert_true("fix_bak_created", bool(save_fix.get("backup_created", false)))
+	var bak3_parse: Dictionary = PlayerProfileCodec.parse_json_text(_read_raw(primary3 + ".bak"))
+	_assert_true("fix_bak_valid", bool(bak3_parse.get("ok", false)))
+
+	# corrupt primary + missing backup → fail closed
+	var case4: String = _unique_case("cor_only")
+	var primary4: String = case4.path_join("player_profile.json")
+	_write_raw(primary4, "{onlybroken")
+	var fp4: Dictionary = _file_fingerprint(primary4)
+	var save4: Dictionary = SaveFileStore.save_text(primary4, t_new, validator)
+	_assert_true("cor_only_fail", bool(save4.get("ok", true)) == false)
+	var fp4b: Dictionary = _file_fingerprint(primary4)
+	_assert_eq("cor_only_hash", str(fp4.get("sha256")), str(fp4b.get("sha256")))
+	_assert_true("cor_only_no_tmp", FileAccess.file_exists(primary4 + ".tmp") == false)
+
+	# both corrupt → fail closed
+	var case5: String = _unique_case("both_cor")
+	var primary5: String = case5.path_join("player_profile.json")
+	_write_raw(primary5, "{p")
+	_write_raw(primary5 + ".bak", "{b")
+	var p5a: Dictionary = _file_fingerprint(primary5)
+	var b5a: Dictionary = _file_fingerprint(primary5 + ".bak")
+	var save5: Dictionary = SaveFileStore.save_text(primary5, t_new, validator)
+	_assert_true("both_cor_fail", bool(save5.get("ok", true)) == false)
+	_assert_eq("both_cor_p_hash", str(p5a.get("sha256")), str(_file_fingerprint(primary5).get("sha256")))
+	_assert_eq("both_cor_b_hash", str(b5a.get("sha256")), str(_file_fingerprint(primary5 + ".bak").get("sha256")))
+	_assert_true("both_cor_no_tmp", FileAccess.file_exists(primary5 + ".tmp") == false)
+
+	# missing primary + corrupt backup → fail closed
+	var case6: String = _unique_case("miss_cor_bak")
+	var primary6: String = case6.path_join("player_profile.json")
+	_write_raw(primary6 + ".bak", "{cb")
+	var b6a: Dictionary = _file_fingerprint(primary6 + ".bak")
+	var save6: Dictionary = SaveFileStore.save_text(primary6, t_new, validator)
+	_assert_true("miss_cor_bak_fail", bool(save6.get("ok", true)) == false)
+	_assert_eq("miss_cor_bak_hash", str(b6a.get("sha256")), str(_file_fingerprint(primary6 + ".bak").get("sha256")))
+	_assert_true("miss_cor_no_primary", FileAccess.file_exists(primary6) == false)
+
+	SaveFileStore.remove_test_artifacts(primary1)
+	SaveFileStore.remove_test_artifacts(primary2)
+	SaveFileStore.remove_test_artifacts(primary3)
+	SaveFileStore.remove_test_artifacts(primary4)
+	SaveFileStore.remove_test_artifacts(primary5)
+	SaveFileStore.remove_test_artifacts(primary6)
+	print("[INFO] backup preservation policies passed")
+
+
+func _write_raw(path: String, text: String) -> void:
+	var dir: String = path.get_base_dir()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
+
+
+func _read_raw(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var t: String = f.get_as_text()
+	f.close()
+	return t
 
 
 func _run_player_data_tests() -> void:
@@ -336,12 +508,79 @@ func _run_player_data_tests() -> void:
 	_assert_eq("pd_fail_app_name", str(_app().call("get_player_name")), "Keep")
 	PlayerData.clear_save_override_for_tests()
 
-	# Test path guard
+	# Test path guard (basic)
 	_assert_true("pd_reject_prod_path", PlayerData.configure_test_storage_path("user://feibao") == false)
 	_assert_true("pd_reject_root", PlayerData.configure_test_storage_path("user://feibao_tests") == false)
 	_assert_true("pd_reject_other", PlayerData.configure_test_storage_path("user://other") == false)
-	_assert_true("pd_prod_untouched", _prod_untouched())
 	print("[INFO] PlayerData initialize/save/recovery passed")
+
+
+func _run_path_containment_tests() -> void:
+	var nested: Dictionary = SaveFileStore.normalize_test_storage_dir("user://feibao_tests/nested/case_b")
+	_assert_true("path_nested_ok", bool(nested.get("ok", false)))
+	_assert_eq("path_nested_value", str(nested.get("path", "")), "user://feibao_tests/nested/case_b")
+
+	var trail: Dictionary = SaveFileStore.normalize_test_storage_dir("user://feibao_tests/case_c/")
+	_assert_true("path_trail_ok", bool(trail.get("ok", false)))
+	_assert_eq("path_trail_norm", str(trail.get("path", "")), "user://feibao_tests/case_c")
+
+	_assert_true("path_lookalike_reject", PlayerData.configure_test_storage_path("user://feibao_tests_case") == false)
+	_assert_true("path_prod_reject", PlayerData.configure_test_storage_path("user://feibao") == false)
+	_assert_true("path_trav_reject", PlayerData.configure_test_storage_path("user://feibao_tests/../feibao") == false)
+	_assert_true("path_multi_trav_reject", PlayerData.configure_test_storage_path("user://feibao_tests/a/../../feibao") == false)
+	_assert_true("path_root_reject", PlayerData.configure_test_storage_path("user://feibao_tests/") == false)
+	_assert_true("path_empty_reject", PlayerData.configure_test_storage_path("") == false)
+	_assert_true("path_res_reject", PlayerData.configure_test_storage_path("res://feibao_tests/case") == false)
+
+	# rejected configure preserves previous
+	var keep: String = _begin_case("path_keep")
+	_assert_true("path_keep_set", PlayerData.configure_test_storage_path(keep))
+	_assert_true("path_keep_reject", PlayerData.configure_test_storage_path("user://feibao_tests/../feibao") == false)
+	_assert_eq("path_keep_still", PlayerData.get_primary_path().get_base_dir(), keep)
+
+	# rejected cleanup does not delete existing test case file
+	PlayerData.initialize()
+	PlayerData.save_player_name("KeepCase")
+	var pri: String = PlayerData.get_primary_path()
+	_assert_true("path_case_exists", FileAccess.file_exists(pri))
+	var bad_clean: Dictionary = SaveFileStore.remove_test_artifacts("user://feibao/player_profile.json")
+	_assert_true("path_bad_clean_fail", bool(bad_clean.get("ok", true)) == false)
+	_assert_true("path_case_still_exists", FileAccess.file_exists(pri))
+
+	# valid cleanup removes three artifacts
+	var t_ok: Dictionary = SaveFileStore.remove_test_artifacts(pri)
+	_assert_true("path_good_clean_ok", bool(t_ok.get("ok", false)))
+	_assert_true("path_good_clean_pri", FileAccess.file_exists(pri) == false)
+	_assert_true("path_good_clean_tmp", FileAccess.file_exists(pri + ".tmp") == false)
+	_assert_true("path_good_clean_bak", FileAccess.file_exists(pri + ".bak") == false)
+	print("[INFO] path containment guards passed")
+
+
+func _run_player_data_retry_state_tests() -> void:
+	var path: String = _begin_case("retry")
+	PlayerData.initialize()
+	PlayerData.save_player_name("RetryBase")
+	PlayerData.set_save_override_for_tests(func(_p: String, _t: String) -> Dictionary:
+		return {"ok": false, "backup_created": false, "error": "forced"}
+	)
+	var fail: Dictionary = PlayerData.save_player_name("RetryNew")
+	_assert_true("retry_fail_ok", bool(fail.get("ok", true)) == false)
+	_assert_eq("retry_fail_state", str(PlayerData.get_load_state()), "SAVE_FAILED")
+	_assert_eq("retry_fail_name", PlayerData.get_player_name(), "RetryBase")
+	_assert_eq("retry_fail_app", str(_app().call("get_player_name")), "RetryBase")
+	PlayerData.clear_save_override_for_tests()
+	var ok: Dictionary = PlayerData.save_player_name("RetryNew")
+	_assert_true("retry_ok", bool(ok.get("ok", false)))
+	_assert_eq("retry_state", str(PlayerData.get_load_state()), "LOADED_PRIMARY")
+	_assert_eq("retry_error_cleared", PlayerData.get_last_error(), "")
+	_assert_eq("retry_name", PlayerData.get_player_name(), "RetryNew")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	_assert_eq("retry_reload", PlayerData.get_player_name(), "RetryNew")
+	var same: Dictionary = PlayerData.save_player_name("RetryNew")
+	_assert_true("retry_same_ok", bool(same.get("ok", false)))
+	_assert_true("retry_same_no_change", bool(same.get("changed", true)) == false)
+	print("[INFO] PlayerData save failure retry state passed")
 
 
 func _run_boot_login_tests() -> void:
@@ -452,9 +691,7 @@ func _run_boot_login_tests() -> void:
 			)
 	shell.queue_free()
 
-	_assert_true("prod_still_untouched", _prod_untouched())
 	print("[INFO] boot/login persistence and rollback passed")
-
 
 func _assert_true(test_name: String, condition: bool) -> void:
 	if condition:

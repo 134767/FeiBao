@@ -46,7 +46,10 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Production: `user://feibao/player_profile.json`
 - Codec: exact-integer schema/revision; no silent fractional truncation
 - Staged write + backup recovery (not absolute atomic guarantee)
+- Only validated primary updates backup; recovery-after-corrupt must preserve legal backup
+- Fail closed when primary/backup are both invalid
 - Corrupt files are not deleted on initialize
+- Tests: `user://feibao_tests/<case>/` with canonical containment; fingerprint production artifacts instead of requiring them to be absent
 
 ## Git Branch & PR Rules
 

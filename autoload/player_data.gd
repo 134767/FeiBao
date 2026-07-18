@@ -11,7 +11,6 @@ const STATE_SAVE_FAILED: StringName = &"SAVE_FAILED"
 
 const PROD_DIR: String = "user://feibao"
 const PROD_PRIMARY: String = "user://feibao/player_profile.json"
-const TEST_ROOT_PREFIX: String = "user://feibao_tests/"
 
 const NOTICE_RECOVERED: String = "已從備份還原玩家資料"
 const NOTICE_CORRUPT: String = "玩家資料損壞，已使用安全預設（尚未覆蓋原檔）"
@@ -44,13 +43,11 @@ func get_primary_path() -> String:
 
 
 func configure_test_storage_path(path: String) -> bool:
-	if path.is_empty() or not path.begins_with(TEST_ROOT_PREFIX):
+	var check: Dictionary = SaveFileStore.normalize_test_storage_dir(path)
+	if not bool(check.get("ok", false)):
+		# Do not change existing configuration on rejection.
 		return false
-	# Normalize trailing slash
-	var cleaned: String = path.rstrip("/")
-	if cleaned == "user://feibao_tests":
-		return false
-	_test_storage_dir = cleaned
+	_test_storage_dir = str(check.get("path", ""))
 	return true
 
 
@@ -220,6 +217,8 @@ func save_player_name(value: String) -> Dictionary:
 	_profile = candidate
 	_last_save_wrote_disk = true
 	_last_error = ""
+	_user_notice = ""
+	_load_state = STATE_LOADED_PRIMARY
 	AppState.set_player_name(trimmed)
 	return {
 		"ok": true,
@@ -252,16 +251,21 @@ func restore_profile_snapshot(snapshot: PlayerProfile) -> Dictionary:
 			Callable(self, "_validate_profile_text")
 		)
 	if not bool(disk.get("ok", false)):
+		_load_state = STATE_SAVE_FAILED
 		_last_error = "rollback disk write failed: %s" % str(disk.get("error", ""))
 		return {"ok": true, "error": _last_error, "disk_ok": false}
 
 	_last_error = ""
+	_load_state = STATE_LOADED_PRIMARY
 	return {"ok": true, "error": "", "disk_ok": true}
 
 
 func cleanup_test_artifacts() -> Dictionary:
 	if _test_storage_dir.is_empty():
 		return {"ok": false, "error": "no test storage configured"}
+	var check: Dictionary = SaveFileStore.normalize_test_storage_dir(_test_storage_dir)
+	if not bool(check.get("ok", false)):
+		return {"ok": false, "error": "configured test path failed containment"}
 	return SaveFileStore.remove_test_artifacts(get_primary_path())
 
 
