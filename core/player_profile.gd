@@ -100,6 +100,88 @@ func with_player_name(value: String) -> PlayerProfile:
 	)
 
 
+## Immutable grant. Catalog existence is validated by PlayerData, not here.
+## Returns { ok, changed, profile, error }.
+func with_character_granted(character_id: StringName) -> Dictionary:
+	var id_check: Dictionary = _validate_character_id(character_id)
+	if not bool(id_check.get("ok", false)):
+		return _mutation_fail(str(id_check.get("error", "invalid character id")))
+	if owns_character(character_id):
+		return {
+			"ok": true,
+			"changed": false,
+			"profile": duplicate_profile(),
+			"error": "",
+		}
+	var next_owned: Array[StringName] = _owned_character_ids.duplicate()
+	next_owned.append(character_id)
+	var next: PlayerProfile = PlayerProfile.new(
+		_player_name,
+		next_owned,
+		_selected_character_id,
+		_revision + 1,
+		_schema_version,
+		_profile_kind
+	)
+	return {
+		"ok": true,
+		"changed": true,
+		"profile": next,
+		"error": "",
+	}
+
+
+## Immutable select representative. character_id must already be owned.
+## Returns { ok, changed, profile, error }.
+func with_selected_character(character_id: StringName) -> Dictionary:
+	var id_check: Dictionary = _validate_character_id(character_id)
+	if not bool(id_check.get("ok", false)):
+		return _mutation_fail(str(id_check.get("error", "invalid character id")))
+	if not owns_character(character_id):
+		return _mutation_fail("character is not owned")
+	if _selected_character_id == character_id:
+		return {
+			"ok": true,
+			"changed": false,
+			"profile": duplicate_profile(),
+			"error": "",
+		}
+	var next: PlayerProfile = PlayerProfile.new(
+		_player_name,
+		_owned_character_ids.duplicate(),
+		character_id,
+		_revision + 1,
+		_schema_version,
+		_profile_kind
+	)
+	return {
+		"ok": true,
+		"changed": true,
+		"profile": next,
+		"error": "",
+	}
+
+
+func _validate_character_id(character_id: StringName) -> Dictionary:
+	var id_str: String = String(character_id)
+	if id_str.is_empty():
+		return {"ok": false, "error": "character id is empty"}
+	var regex := RegEx.new()
+	regex.compile(_ID_PATTERN)
+	if regex.search(id_str) == null:
+		return {"ok": false, "error": "character id has invalid syntax"}
+	return {"ok": true, "error": ""}
+
+
+func _mutation_fail(error: String) -> Dictionary:
+	return {
+		"ok": false,
+		"changed": false,
+		"profile": duplicate_profile(),
+		"error": error,
+	}
+
+
 func to_dictionary() -> Dictionary:
 	var owned: Array = []
 	for id in _owned_character_ids:

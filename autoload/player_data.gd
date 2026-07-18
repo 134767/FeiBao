@@ -2,6 +2,10 @@
 ## Does not own navigation or UI. AppState remains in-memory session state only.
 extends Node
 
+signal profile_changed(revision: int)
+signal character_granted(character_id: StringName, revision: int)
+signal selected_character_changed(character_id: StringName, revision: int)
+
 const STATE_UNINITIALIZED: StringName = &"UNINITIALIZED"
 const STATE_NEW_PROFILE: StringName = &"NEW_PROFILE"
 const STATE_LOADED_PRIMARY: StringName = &"LOADED_PRIMARY"
@@ -17,6 +21,9 @@ const NOTICE_RECOVERED: String = "已從備份還原玩家資料"
 const NOTICE_CORRUPT: String = "玩家資料損壞，已使用安全預設（尚未覆蓋原檔）"
 const ERR_SAVE_FAILED: String = "無法儲存玩家資料，請再試一次"
 const ERR_TX_ROLLBACK: String = "transaction rollback failure"
+const ERR_UNKNOWN_CHARACTER: String = "unknown character id"
+const ERR_CATALOG_LOAD: String = "character catalog load failed"
+const ERR_NOT_OWNED: String = "character is not owned"
 
 var _initialized: bool = false
 var _profile: PlayerProfile = null
@@ -142,6 +149,42 @@ func get_selected_character_id() -> StringName:
 	return get_profile().get_selected_character_id()
 
 
+func get_owned_character_ids() -> Array[StringName]:
+	return get_profile().get_owned_character_ids()
+
+
+func is_known_character(character_id: StringName) -> bool:
+	var catalog: Dictionary = CharacterCatalog.load_default()
+	return _catalog_contains_character(catalog, character_id)
+
+
+func get_known_owned_count() -> int:
+	var catalog: Dictionary = CharacterCatalog.load_default()
+	if not bool(catalog.get("ok", false)):
+		return 0
+	var known: Dictionary = {}
+	for item in catalog.get("characters", []):
+		if item is CharacterDefinition:
+			known[str((item as CharacterDefinition).get_id())] = true
+	var count: int = 0
+	for id in get_owned_character_ids():
+		if known.has(str(id)):
+			count += 1
+	return count
+
+
+func _catalog_contains_character(catalog: Dictionary, character_id: StringName) -> bool:
+	if not bool(catalog.get("ok", false)):
+		return false
+	var id_str: String = String(character_id)
+	if id_str.is_empty():
+		return false
+	for item in catalog.get("characters", []):
+		if item is CharacterDefinition and (item as CharacterDefinition).get_id() == character_id:
+			return true
+	return false
+
+
 func get_load_state() -> StringName:
 	return _load_state
 
@@ -156,6 +199,14 @@ func get_user_notice() -> String:
 
 func did_last_save_write_disk() -> bool:
 	return _last_save_wrote_disk
+
+
+func grant_character(character_id: StringName) -> Dictionary:
+	return _mutate_character_ownership(character_id, &"grant")
+
+
+func select_character(character_id: StringName) -> Dictionary:
+	return _mutate_character_ownership(character_id, &"select")
 
 
 func save_player_name(value: String) -> Dictionary:
@@ -182,16 +233,105 @@ func save_player_name(value: String) -> Dictionary:
 		}
 
 	var candidate: PlayerProfile = current.with_player_name(trimmed)
-	var encoded: Dictionary = PlayerProfileCodec.encode_profile(candidate)
-	if not bool(encoded.get("ok", false)):
-		_load_state = STATE_SAVE_FAILED
-		_last_error = str(encoded.get("error", "encode failed"))
+	var commit: Dictionary = _commit_candidate_profile(candidate)
+	if not bool(commit.get("ok", false)):
 		return {
 			"ok": false,
 			"changed": false,
 			"error": ERR_SAVE_FAILED,
 			"profile_revision": current.get_revision(),
 		}
+
+	AppState.set_player_name(trimmed)
+	return {
+		"ok": true,
+		"changed": true,
+		"error": "",
+		"profile_revision": candidate.get_revision(),
+	}
+
+
+func _mutate_character_ownership(character_id: StringName, mode: StringName) -> Dictionary:
+	_last_save_wrote_disk = false
+	if not _initialized:
+		initialize()
+
+	var current: PlayerProfile = get_profile()
+	var base_result: Dictionary = {
+		"ok": false,
+		"changed": false,
+		"error": "",
+		"profile_revision": current.get_revision(),
+		"character_id": character_id,
+	}
+
+	var catalog: Dictionary = CharacterCatalog.load_default()
+	if not bool(catalog.get("ok", false)):
+		base_result["error"] = ERR_CATALOG_LOAD
+		return base_result
+
+	if not _catalog_contains_character(catalog, character_id):
+		base_result["error"] = ERR_UNKNOWN_CHARACTER
+		return base_result
+
+	var mutation: Dictionary
+	if mode == &"grant":
+		mutation = current.with_character_granted(character_id)
+	else:
+		mutation = current.with_selected_character(character_id)
+
+	if not bool(mutation.get("ok", false)):
+		base_result["error"] = str(mutation.get("error", ERR_NOT_OWNED))
+		return base_result
+
+	var candidate: PlayerProfile = mutation["profile"] as PlayerProfile
+	if candidate == null:
+		base_result["error"] = "mutation produced no profile"
+		return base_result
+
+	if not bool(mutation.get("changed", false)):
+		return {
+			"ok": true,
+			"changed": false,
+			"error": "",
+			"profile_revision": current.get_revision(),
+			"character_id": character_id,
+		}
+
+	var commit: Dictionary = _commit_candidate_profile(candidate)
+	if not bool(commit.get("ok", false)):
+		return {
+			"ok": false,
+			"changed": false,
+			"error": ERR_SAVE_FAILED,
+			"profile_revision": current.get_revision(),
+			"character_id": character_id,
+		}
+
+	var rev: int = candidate.get_revision()
+	profile_changed.emit(rev)
+	if mode == &"grant":
+		character_granted.emit(character_id, rev)
+	else:
+		selected_character_changed.emit(character_id, rev)
+
+	return {
+		"ok": true,
+		"changed": true,
+		"error": "",
+		"profile_revision": rev,
+		"character_id": character_id,
+	}
+
+
+## Shared candidate commit: encode + save, publish only on success.
+func _commit_candidate_profile(candidate: PlayerProfile) -> Dictionary:
+	var current: PlayerProfile = get_profile()
+	var encoded: Dictionary = PlayerProfileCodec.encode_profile(candidate)
+	if not bool(encoded.get("ok", false)):
+		_load_state = STATE_SAVE_FAILED
+		_last_error = str(encoded.get("error", "encode failed"))
+		return {"ok": false, "error": _last_error}
 
 	var text: String = str(encoded.get("text", ""))
 	var save_result: Dictionary
@@ -207,25 +347,14 @@ func save_player_name(value: String) -> Dictionary:
 	if not bool(save_result.get("ok", false)):
 		_load_state = STATE_SAVE_FAILED
 		_last_error = str(save_result.get("error", "save failed"))
-		return {
-			"ok": false,
-			"changed": false,
-			"error": ERR_SAVE_FAILED,
-			"profile_revision": current.get_revision(),
-		}
+		return {"ok": false, "error": _last_error}
 
 	_profile = candidate
 	_last_save_wrote_disk = true
 	_last_error = ""
 	_user_notice = ""
 	_load_state = STATE_LOADED_PRIMARY
-	AppState.set_player_name(trimmed)
-	return {
-		"ok": true,
-		"changed": true,
-		"error": "",
-		"profile_revision": candidate.get_revision(),
-	}
+	return {"ok": true, "error": ""}
 
 
 ## Capture full memory + artifact snapshot before a login persistence transaction.

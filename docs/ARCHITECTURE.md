@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.5.0** — local player profile save foundation.
+**Current version: 0.6.0** — character ownership integrated with the catalog.
 
 Does **not** claim production multiplayer, combat, or cloud systems.
 
@@ -15,7 +15,8 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 | 0.2.0 | GameShell, Boot / Login / Lobby |
 | 0.3.0 | Registry metadata, shared ModuleScreen, module navigation |
 | 0.4.0 | Dedicated character catalog module + development seeds |
-| **0.5.0 (current)** | Local versioned player profile, staged save, backup recovery |
+| 0.5.0 | Local versioned player profile, staged save, backup recovery |
+| **0.6.0 (current)** | Ownership + representative wired into character catalog UI |
 
 ## Clean-room Principles
 
@@ -43,8 +44,17 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 Bootstrap → GameShell → Boot (PlayerData.initialize)
   → Login (prefill name; manual submit) → Lobby
   ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
-  ⇄ CharacterScreen (catalog definitions only)
+  ⇄ CharacterScreen (catalog + ownership / representative)
 ```
+
+## Character Ownership (0.6.0)
+
+- `PlayerProfile` still stores only character IDs (schema 1, no migration).
+- `PlayerData.grant_character` / `select_character` validate IDs against `CharacterCatalog`.
+- CharacterScreen shows owned/unowned/representative, filters, and set-representative action.
+- No grant UI; no auto-grant of partners; definitions stay free of ownership fields.
+
+See `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`.
 
 ## Local Save (0.5.0)
 

@@ -69,7 +69,7 @@ autowrap_mode = 3
 [node name="RightCol" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
 [node name="SeedBadge" type="Label" parent="Margin/HBox/RightCol"]
 unique_name_in_owner = true
@@ -78,10 +78,17 @@ theme_override_font_sizes/font_size = 10
 text = "開發樣本"
 horizontal_alignment = 2
 
-[node name="SelectedMarker" type="Label" parent="Margin/HBox/RightCol"]
+[node name="OwnershipMarker" type="Label" parent="Margin/HBox/RightCol"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "未持有"
+horizontal_alignment = 2
+
+[node name="StatusMarker" type="Label" parent="Margin/HBox/RightCol"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "已選"
+theme_override_font_sizes/font_size = 11
+text = ""
 horizontal_alignment = 2
