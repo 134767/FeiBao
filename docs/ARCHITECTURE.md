@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.7.0** — active party formation with profile schema 2.
+**Current version: 0.8.0** — adventure stage selection foundation.
 
 Does **not** claim production multiplayer, combat, or cloud systems.
 
@@ -17,7 +17,8 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 | 0.4.0 | Dedicated character catalog module + development seeds |
 | 0.5.0 | Local versioned player profile, staged save, backup recovery |
 | 0.6.0 | Ownership + representative wired into character catalog UI |
-| **0.7.0 (current)** | Active party formation + profile schema 2 + lazy schema 1 migration |
+| 0.7.0 | Active party formation + profile schema 2 + lazy schema 1 migration |
+| **0.8.0 (current)** | Adventure stage selection + StageCatalog + AdventureState preparation |
 
 ## Clean-room Principles
 
@@ -45,9 +46,18 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 Bootstrap → GameShell → Boot (PlayerData.initialize)
   → Login (prefill name; manual submit) → Lobby
   ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
+  ⇄ AdventureScreen (area/stage selection + preparation context)
   ⇄ CharacterScreen (catalog + ownership / representative)
   ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
+
+## Adventure Stage Selection (0.8.0)
+
+- StageCatalog pure data (no UI / PlayerData).
+- AdventureState memory-only prepare_stage for future battle entry.
+- No combat, drops, or stage completion persistence; profile schema stays 2.
+
+See `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`.
 
 ## Active Party (0.7.0)
 

@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 0.7.0** — active party formation with profile schema 2.
+**Current version: 0.8.0** — adventure stage selection foundation.
 
 ## Requirements
 
@@ -22,17 +22,18 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-## What 0.7.0 Adds
+## What 0.8.0 Adds
 
-- Dedicated PartyScreen: 1–3 member active party, leader at slot 0
-- Profile **schema 2** with `active_party_character_ids`
-- Lazy schema 1 → 2 migration (no boot write; next successful save persists v2)
-- Representative (`selected_character_id`) remains separate from party leader
+- Dedicated AdventureScreen with area story + stage grid
+- Pure StageCatalog (schema 1 development seed: 2 areas × 3 stages)
+- AdventureState in-memory stage preparation (no disk / no combat yet)
+- PlayerProfile schema remains **2**
 
 ## Docs
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
+- `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`
 - `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`
 - `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`
 - `docs/FEIBAO_0.5.0_LOCAL_PLAYER_SAVE.md`

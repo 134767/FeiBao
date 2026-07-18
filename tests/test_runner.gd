@@ -9,7 +9,7 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (0.7.0) ===")
+	print("=== FeiBao Test Runner (0.8.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
 
@@ -30,11 +30,18 @@ func _run_tests() -> void:
 		"res://tests/player_profile_save_smoke_test.gd",
 		"res://tests/character_ownership_smoke_test.gd",
 		"res://tests/active_party_smoke_test.gd",
+		"res://tests/adventure_stage_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
+	var adventure_state: Node = root.get_node_or_null("AdventureState")
+	if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
+		adventure_state.call("reset_runtime_state_for_tests")
+
 	for path in suites:
 		print("--- Suite: %s ---" % path)
+		if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
+			adventure_state.call("reset_runtime_state_for_tests")
 		var script: GDScript = load(path) as GDScript
 		if script == null:
 			print("[FAIL] load_suite: %s" % path)
@@ -57,6 +64,8 @@ func _run_tests() -> void:
 		player_data.call("cleanup_test_artifacts")
 		player_data.call("clear_test_storage_path")
 		player_data.call("reset_runtime_state_for_tests")
+	if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
+		adventure_state.call("reset_runtime_state_for_tests")
 
 	var prod_after: Dictionary = _snapshot_production_artifacts()
 	if not _production_fingerprints_match(prod_before, prod_after):
