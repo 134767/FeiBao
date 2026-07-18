@@ -251,13 +251,15 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	var next_sy: int = int(snapshot.get("selected_y", -1))
 	var next_match: int = int(snapshot.get("last_match_count", 0))
 	var next_cascade: int = int(snapshot.get("last_cascade_count", 0))
-	var next_events: Array = []
-	var raw_events: Variant = snapshot.get("last_resolution_events", [])
-	var events_check: Dictionary = BattleResolutionEvent.validate_events(raw_events)
+	if not snapshot.has("last_resolution_events"):
+		return _result(false, false, "missing last_resolution_events")
+	var raw_events: Variant = snapshot.get("last_resolution_events")
+	var events_check: Dictionary = BattleResolutionEvent.validate_events_with_counts(
+		raw_events, next_match, next_cascade
+	)
 	if not bool(events_check.get("ok", false)):
 		return _result(false, false, "invalid resolution events: %s" % str(events_check.get("error", "")))
-	if raw_events is Array:
-		next_events = BattleResolutionEvent.duplicate_events(raw_events as Array)
+	var next_events: Array = events_check.get("events", []) as Array
 	var next_msg: String = str(snapshot.get("last_message", ""))
 
 	# RESOLVING is not restorable (no mid-resolution resume state in 1.0.0).

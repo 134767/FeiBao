@@ -210,8 +210,26 @@ func _wire_focus_neighbors() -> void:
 				btn.focus_neighbor_right = btn.get_path_to(_cell_buttons[BattleBoardModel.index_of(x + 1, y)])
 			if y > 0:
 				btn.focus_neighbor_top = btn.get_path_to(_cell_buttons[BattleBoardModel.index_of(x, y - 1)])
+			else:
+				# Escape upward to header Back.
+				if _back_button != null:
+					btn.focus_neighbor_top = btn.get_path_to(_back_button)
 			if y < BattleBoardModel.HEIGHT - 1:
 				btn.focus_neighbor_bottom = btn.get_path_to(_cell_buttons[BattleBoardModel.index_of(x, y + 1)])
+			else:
+				# Escape downward to Leave.
+				if _leave_button != null:
+					btn.focus_neighbor_bottom = btn.get_path_to(_leave_button)
+	if _back_button != null and _cell_buttons.size() > 0:
+		_back_button.focus_neighbor_bottom = _back_button.get_path_to(_cell_buttons[0])
+		if _leave_button != null:
+			_back_button.focus_neighbor_right = _back_button.get_path_to(_leave_button)
+	if _leave_button != null and _cell_buttons.size() > 0:
+		_leave_button.focus_neighbor_bottom = _leave_button.get_path_to(
+			_cell_buttons[BattleBoardModel.CELL_COUNT - 1]
+		)
+		if _back_button != null:
+			_leave_button.focus_neighbor_left = _leave_button.get_path_to(_back_button)
 
 
 func _apply_session_ui() -> void:

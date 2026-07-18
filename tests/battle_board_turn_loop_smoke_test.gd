@@ -523,38 +523,136 @@ func _run_cascade_event_tests() -> void:
 
 func _run_event_equality_tests() -> void:
 	_begin_case("eveq")
+	# Minimal valid completed sequence (one cascade).
+	var cells3: Array = [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}]
 	var a: Array = [
 		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
-		BattleResolutionEvent.make_match_found(1, [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}]),
-		BattleResolutionEvent.make_cells_cleared(1, [{"x": 0, "y": 0}], [BattleOrbKind.EMBER]),
+		BattleResolutionEvent.make_match_found(1, cells3),
+		BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]),
 		BattleResolutionEvent.make_gravity_applied([{"from_x": 0, "from_y": 1, "to_x": 0, "to_y": 4}]),
+		BattleResolutionEvent.make_cells_refilled([{"x": 0, "y": 0}], [BattleOrbKind.TIDE]),
+		BattleResolutionEvent.make_cascade_completed(1, 3),
+		BattleResolutionEvent.make_turn_completed(1, 1, 3),
 	]
 	var b: Array = BattleResolutionEvent.duplicate_events(a)
 	_assert_true("eveq_valid", bool(BattleResolutionEvent.validate_events(a).get("ok", false)))
 	_assert_true("eveq_same", BattleResolutionEvent.events_equal(a, b))
 	var mut_xy: Array = BattleResolutionEvent.duplicate_events(a)
-	(mut_xy[1] as Dictionary)["matched_cells"] = [{"x": 9, "y": 9}]
+	(mut_xy[1] as Dictionary)["matched_cells"] = [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 3, "y": 0}]
 	_assert_true("eveq_xy_diff", BattleResolutionEvent.events_equal(a, mut_xy) == false)
 	var mut_kind: Array = BattleResolutionEvent.duplicate_events(a)
-	(mut_kind[2] as Dictionary)["orb_kinds"] = [BattleOrbKind.TIDE]
+	(mut_kind[2] as Dictionary)["orb_kinds"] = [BattleOrbKind.TIDE, BattleOrbKind.TIDE, BattleOrbKind.TIDE]
 	_assert_true("eveq_kind_diff", BattleResolutionEvent.events_equal(a, mut_kind) == false)
 	var mut_move: Array = BattleResolutionEvent.duplicate_events(a)
 	(mut_move[3] as Dictionary)["movements"] = [
 		{"from": {"x": 0, "y": 4}, "to": {"x": 0, "y": 1}},
 	]
 	_assert_true("eveq_move_diff", BattleResolutionEvent.events_equal(a, mut_move) == false)
-	# Unknown type never equal / never valid.
 	var unk: Array = [{"type": &"not_a_real_event", "payload": 1}]
 	_assert_true("eveq_unk_invalid", bool(BattleResolutionEvent.validate_events(unk).get("ok", true)) == false)
 	_assert_true("eveq_unk_not_equal", BattleResolutionEvent.events_equal(a, unk) == false)
 	_assert_true("eveq_unk_self", BattleResolutionEvent.events_equal(unk, unk) == false)
-	# Illegal kind in clear event.
-	var bad_kind_ev: Array = [
-		BattleResolutionEvent.make_cells_cleared(1, [{"x": 0, "y": 0}], [&"not_an_orb"]),
-	]
+	# G1–G15 structural rejects
+	_assert_true("g1_nonarray", bool(BattleResolutionEvent.validate_events("invalid").get("ok", true)) == false)
+	_assert_true("g2_nondict", bool(BattleResolutionEvent.validate_events([123]).get("ok", true)) == false)
+	_assert_true("g3_unknown", bool(BattleResolutionEvent.validate_events([{"type": &"unknown_event"}]).get("ok", true)) == false)
 	_assert_true(
-		"eveq_bad_kind_invalid",
-		bool(BattleResolutionEvent.validate_events(bad_kind_ev).get("ok", true)) == false
+		"g4_missing_key",
+		bool(BattleResolutionEvent.validate_event({"type": &"swap", "to": {"x": 0, "y": 0}}).get("ok", true)) == false
+	)
+	_assert_true(
+		"g5_oob",
+		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(9, 0))).get("ok", true))
+		== false
+	)
+	_assert_true(
+		"g6_nonadj",
+		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(3, 0))).get("ok", true))
+		== false
+	)
+	_assert_true(
+		"g7_len_mismatch",
+		bool(
+			BattleResolutionEvent.validate_event(
+				BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER])
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g8_bad_kind",
+		bool(
+			BattleResolutionEvent.validate_event(
+				BattleResolutionEvent.make_cells_cleared(1, cells3, [&"bogus", &"bogus", &"bogus"])
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g9_dup_cells",
+		bool(
+			BattleResolutionEvent.validate_event(
+				BattleResolutionEvent.make_match_found(1, [{"x": 0, "y": 0}, {"x": 0, "y": 0}, {"x": 1, "y": 0}])
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g10_cross_col",
+		bool(
+			BattleResolutionEvent.validate_event(
+				{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 1}, "to": {"x": 1, "y": 4}}]}
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g10_upward",
+		bool(
+			BattleResolutionEvent.validate_event(
+				{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 4}, "to": {"x": 0, "y": 1}}]}
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g10_same",
+		bool(
+			BattleResolutionEvent.validate_event(
+				{"type": &"gravity_applied", "movements": [{"from": {"x": 0, "y": 1}, "to": {"x": 0, "y": 1}}]}
+			).get("ok", true)
+		)
+		== false
+	)
+	_assert_true(
+		"g11_cascade0",
+		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_cascade_completed(0, 3)).get("ok", true))
+		== false
+	)
+	_assert_true(
+		"g11_neg_count",
+		bool(BattleResolutionEvent.validate_event(BattleResolutionEvent.make_turn_completed(1, 1, -1)).get("ok", true))
+		== false
+	)
+	var bad_order: Array = [
+		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
+		BattleResolutionEvent.make_cells_cleared(1, cells3, [BattleOrbKind.EMBER, BattleOrbKind.EMBER, BattleOrbKind.EMBER]),
+		BattleResolutionEvent.make_match_found(1, cells3),
+		BattleResolutionEvent.make_turn_completed(1, 1, 3),
+	]
+	_assert_true("g12_order", bool(BattleResolutionEvent.validate_events(bad_order).get("ok", true)) == false)
+	var not_last: Array = [
+		BattleResolutionEvent.make_swap(Vector2i(0, 0), Vector2i(1, 0)),
+		BattleResolutionEvent.make_turn_completed(1, 1, 3),
+		BattleResolutionEvent.make_match_found(1, cells3),
+	]
+	_assert_true("g13_turn_not_last", bool(BattleResolutionEvent.validate_events(not_last).get("ok", true)) == false)
+	var bad_cc: Array = BattleResolutionEvent.duplicate_events(a)
+	(bad_cc[bad_cc.size() - 1] as Dictionary)["cascade_count"] = 9
+	_assert_true("g14_cascade_mismatch", bool(BattleResolutionEvent.validate_events(bad_cc).get("ok", true)) == false)
+	_assert_true(
+		"g15_counts",
+		bool(BattleResolutionEvent.validate_events_with_counts(a, 99, 1).get("ok", true)) == false
 	)
 	print("[INFO] event equality tests passed")
 
@@ -652,35 +750,42 @@ func _run_runtime_snapshot_tests() -> void:
 	bad_rng["rng_state"] = 0
 	_assert_true("rt_bad_rng", bool(BattleRuntime.restore_runtime_snapshot(bad_rng).get("ok", true)) == false)
 
-	# Illegal event snapshot fail closed — preserve runtime domain exact.
+	# Illegal event snapshot fail closed — preserve runtime domain exact + no signals.
 	var before_ev: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	var sig_rt: Array = [0]
+	var sig_bd: Array = [0]
+	var sig_ph: Array = [0]
+	var on_rt2 := func(_a: bool) -> void:
+		sig_rt[0] = int(sig_rt[0]) + 1
+	var on_bd := func() -> void:
+		sig_bd[0] = int(sig_bd[0]) + 1
+	var on_ph := func(_p: StringName) -> void:
+		sig_ph[0] = int(sig_ph[0]) + 1
+	BattleRuntime.runtime_changed.connect(on_rt2)
+	BattleRuntime.board_changed.connect(on_bd)
+	BattleRuntime.phase_changed.connect(on_ph)
 	var bad_ev: Dictionary = before_ev.duplicate(true)
-	bad_ev["last_resolution_events"] = [{"type": &"unknown_type", "x": 1}]
-	var bad_ev_res: Dictionary = BattleRuntime.restore_runtime_snapshot(bad_ev)
-	_assert_true("rt_bad_events_reject", bool(bad_ev_res.get("ok", true)) == false)
-	_assert_true("rt_bad_events_board", _cells_eq(before_ev.get("board_cells", []), BattleRuntime.get_board_cells()))
-	_assert_eq("rt_bad_events_rng", BattleRuntime.get_rng_state(), int(before_ev.get("rng_state", -1)))
-	_assert_eq("rt_bad_events_turn", BattleRuntime.get_turn_count(), int(before_ev.get("turn_count", -1)))
-	_assert_eq("rt_bad_events_phase", str(BattleRuntime.get_phase()), str(before_ev.get("phase", &"")))
-	_assert_true(
-		"rt_bad_events_queue",
-		BattleResolutionEvent.events_equal(
-			before_ev.get("last_resolution_events", []) as Array,
-			BattleRuntime.get_last_resolution_events()
-		)
-	)
-	var bad_ev2: Dictionary = before_ev.duplicate(true)
-	bad_ev2["last_resolution_events"] = [
-		{"type": &"cells_cleared", "cascade_index": 1, "cells": [{"x": 0, "y": 0}], "orb_kinds": [&"bogus"]},
-	]
-	_assert_true(
-		"rt_bad_kind_events_reject",
-		bool(BattleRuntime.restore_runtime_snapshot(bad_ev2).get("ok", true)) == false
-	)
-	_assert_true(
-		"rt_bad_kind_events_board",
-		_cells_eq(before_ev.get("board_cells", []), BattleRuntime.get_board_cells())
-	)
+	bad_ev["last_resolution_events"] = "invalid"
+	_assert_true("rt_g1_nonarray", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
+	_assert_true("rt_g1_exact", _runtime_exact(before_ev))
+	_assert_eq("rt_g1_sig_rt", int(sig_rt[0]), 0)
+	_assert_eq("rt_g1_sig_bd", int(sig_bd[0]), 0)
+	_assert_eq("rt_g1_sig_ph", int(sig_ph[0]), 0)
+	bad_ev["last_resolution_events"] = [123]
+	_assert_true("rt_g2_nondict", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
+	_assert_true("rt_g2_exact", _runtime_exact(before_ev))
+	bad_ev["last_resolution_events"] = [{"type": &"unknown_type"}]
+	_assert_true("rt_g3_unknown", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
+	_assert_true("rt_g3_exact", _runtime_exact(before_ev))
+	bad_ev["last_resolution_events"] = [{"type": &"swap", "to": {"x": 0, "y": 0}}]
+	_assert_true("rt_g4_missing", bool(BattleRuntime.restore_runtime_snapshot(bad_ev).get("ok", true)) == false)
+	_assert_true("rt_g4_exact", _runtime_exact(before_ev))
+	if BattleRuntime.runtime_changed.is_connected(on_rt2):
+		BattleRuntime.runtime_changed.disconnect(on_rt2)
+	if BattleRuntime.board_changed.is_connected(on_bd):
+		BattleRuntime.board_changed.disconnect(on_bd)
+	if BattleRuntime.phase_changed.is_connected(on_ph):
+		BattleRuntime.phase_changed.disconnect(on_ph)
 
 	# Canonical inactive restore after clear
 	var clr: Dictionary = BattleRuntime.clear_runtime()
@@ -1003,27 +1108,30 @@ func _probe_board_layout(size: Vector2i) -> void:
 	var leave: Button = screen.call("get_leave_button") as Button
 	_assert_true("ly_%s_back_h" % tag, back != null and back.get_global_rect().size.y >= 48.0)
 	_assert_true("ly_%s_leave_h" % tag, leave != null and leave.get_global_rect().size.y >= 48.0)
-	# Reachability: after ensure_control_visible, rect must intersect screen (no size OR).
+	# Reachability: full-within BodyScroll viewport (cells) / screen (header) — no OR.
 	var first: Button = screen.call("get_cell_button", 0, 0) as Button
 	var last: Button = screen.call("get_cell_button", 5, 4) as Button
 	_assert_true("ly_%s_first_present" % tag, first != null)
 	_assert_true("ly_%s_last_present" % tag, last != null)
 	_assert_true("ly_%s_leave_present" % tag, leave != null)
+	var body_rect: Rect2 = body.get_global_rect() if body != null else screen_rect
 	screen.call("ensure_control_visible_for_test", first)
 	await _tree.process_frame
-	_assert_true("ly_%s_first_reach" % tag, first.get_global_rect().intersects(screen_rect))
+	_assert_true("ly_%s_first_full" % tag, _rect_fully_within(first.get_global_rect(), body_rect, 2.0))
 	screen.call("ensure_control_visible_for_test", last)
 	await _tree.process_frame
-	_assert_true("ly_%s_last_reach" % tag, last.get_global_rect().intersects(screen_rect))
-	screen.call("ensure_control_visible_for_test", leave)
-	await _tree.process_frame
-	_assert_true("ly_%s_leave_reach" % tag, leave.get_global_rect().intersects(screen_rect))
-	# Selected visible
+	_assert_true("ly_%s_last_full" % tag, _rect_fully_within(last.get_global_rect(), body_rect, 2.0))
+	_assert_true("ly_%s_back_full" % tag, _rect_fully_within(back.get_global_rect(), screen_rect, 2.0))
+	_assert_true("ly_%s_leave_full" % tag, _rect_fully_within(leave.get_global_rect(), screen_rect, 2.0))
+	# Selected visible + fully within
 	BattleRuntime.select_cell(1, 1)
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
 	var sb: Button = screen.call("get_cell_button", 1, 1) as Button
 	_assert_true("ly_%s_sel" % tag, sb != null and str(sb.text).find("[") >= 0)
+	screen.call("ensure_control_visible_for_test", sb)
+	await _tree.process_frame
+	_assert_true("ly_%s_sel_full" % tag, _rect_fully_within(sb.get_global_rect(), body_rect, 2.0))
 	BattleRuntime.select_cell(1, 1)
 	print(
 		"[INFO] board_layout_%s cell_min=%.1fx%.1f grid=%s screen=%s scroll=%.1f content_h=%.1f page_h=%.1f"
@@ -1057,70 +1165,92 @@ func _probe_keyboard_input() -> void:
 	var c11: Button = screen.call("get_cell_button", 1, 1) as Button
 	var c01: Button = screen.call("get_cell_button", 0, 1) as Button
 	_assert_true("kb_cells", c00 != null and c10 != null and c11 != null and c01 != null)
+	var press_c00: Array = [0]
+	var press_c11: Array = [0]
+	c00.pressed.connect(func() -> void:
+		press_c00[0] = int(press_c00[0]) + 1
+	)
+	c11.pressed.connect(func() -> void:
+		press_c11[0] = int(press_c11[0]) + 1
+	)
 	c00.grab_focus()
 	await _tree.process_frame
 	_assert_true("kb_focus00", c00.has_focus())
 	_assert_true("kb_focus_mode00", c00.focus_mode != Control.FOCUS_NONE)
-	# Visible focus style: theme StyleBox or focus draw.
 	var focus_sb: Variant = c00.get_theme_stylebox("focus")
 	_assert_true("kb_focus_style", focus_sb != null)
 
 	_send_ui_action(sv, "ui_right")
 	await _tree.process_frame
-	_assert_true("kb_right", c10.has_focus())
+	_assert_true("kb_right_owner", sv.gui_get_focus_owner() == c10)
+	_assert_true("kb_right_vis", c10.visible and not c10.disabled and c10.is_inside_tree())
 	_send_ui_action(sv, "ui_down")
 	await _tree.process_frame
-	_assert_true("kb_down", c11.has_focus())
+	_assert_true("kb_down_owner", sv.gui_get_focus_owner() == c11)
 	_send_ui_action(sv, "ui_left")
 	await _tree.process_frame
-	_assert_true("kb_left", c01.has_focus())
+	_assert_true("kb_left_owner", sv.gui_get_focus_owner() == c01)
 	_send_ui_action(sv, "ui_up")
 	await _tree.process_frame
-	_assert_true("kb_up", c00.has_focus())
+	_assert_true("kb_up_owner", sv.gui_get_focus_owner() == c00)
 
-	# Enter select / deselect via real KEY_ENTER (not pressed.emit, not press_cell_for_test).
+	# Clear selection via domain only before keyboard activation evidence (not part of key path).
 	while BattleRuntime.has_selection():
 		var s: Vector2i = BattleRuntime.get_selected_cell()
 		BattleRuntime.select_cell(s.x, s.y)
 	c00.grab_focus()
 	await _tree.process_frame
 	_assert_true("kb_enter_focus", c00.has_focus())
+	_assert_eq("kb_enter_press_base", int(press_c00[0]), 0)
 	_send_key(sv, KEY_ENTER)
 	await _tree.process_frame
 	await _tree.process_frame
+	_assert_eq("kb_enter_callback", int(press_c00[0]), 1)
 	_assert_eq("kb_enter_select", BattleRuntime.get_selected_cell(), Vector2i(0, 0))
-	_assert_true("kb_enter_still_focus", c00.has_focus())
 	_send_key(sv, KEY_ENTER)
 	await _tree.process_frame
 	await _tree.process_frame
+	_assert_eq("kb_enter_callback2", int(press_c00[0]), 2)
 	_assert_true("kb_enter_deselect", BattleRuntime.has_selection() == false)
 
-	# Space select via real KEY_SPACE
 	c11.grab_focus()
 	await _tree.process_frame
 	_assert_true("kb_space_focus", c11.has_focus())
+	_assert_eq("kb_space_press_base", int(press_c11[0]), 0)
 	_send_key(sv, KEY_SPACE)
 	await _tree.process_frame
 	await _tree.process_frame
+	_assert_eq("kb_space_callback", int(press_c11[0]), 1)
 	_assert_eq("kb_space_select", BattleRuntime.get_selected_cell(), Vector2i(1, 1))
 
 	var all_focusable: bool = true
 	for y in 5:
 		for x in 6:
 			var b: Button = screen.call("get_cell_button", x, y) as Button
-			if b == null or b.focus_mode == Control.FOCUS_NONE:
+			if b == null or b.focus_mode == Control.FOCUS_NONE or not b.visible or b.disabled:
+				all_focusable = false
+			if b != null and b.get_theme_stylebox("focus") == null:
 				all_focusable = false
 	_assert_true("kb_all_focusable", all_focusable)
 	var back: Button = screen.call("get_back_button") as Button
 	var leave: Button = screen.call("get_leave_button") as Button
 	_assert_true("kb_back_focusable", back != null and back.focus_mode != Control.FOCUS_NONE)
 	_assert_true("kb_leave_focusable", leave != null and leave.focus_mode != Control.FOCUS_NONE)
-	back.grab_focus()
+	# Focus escape: from top cell ui_up → Back
+	c00.grab_focus()
 	await _tree.process_frame
-	_assert_true("kb_back_has_focus", back.has_focus())
-	leave.grab_focus()
+	_send_ui_action(sv, "ui_up")
 	await _tree.process_frame
-	_assert_true("kb_leave_has_focus", leave.has_focus())
+	_assert_true("kb_escape_up_back", sv.gui_get_focus_owner() == back)
+	_assert_true("kb_back_has_focus", back.has_focus() and back.visible and not back.disabled)
+	# From bottom cell ui_down → Leave
+	var c54: Button = screen.call("get_cell_button", 5, 4) as Button
+	c54.grab_focus()
+	await _tree.process_frame
+	_send_ui_action(sv, "ui_down")
+	await _tree.process_frame
+	_assert_true("kb_escape_down_leave", sv.gui_get_focus_owner() == leave)
+	_assert_true("kb_leave_has_focus", leave.has_focus() and leave.visible and not leave.disabled)
 	_assert_true("kb_no_trap", leave.has_focus() and leave.visible and not leave.disabled)
 	host.queue_free()
 	await _tree.process_frame
@@ -1151,6 +1281,46 @@ func _send_key(sv: SubViewport, keycode: Key) -> void:
 	release.pressed = false
 	release.echo = false
 	sv.push_input(release, true)
+
+
+func _rect_fully_within(inner: Rect2, outer: Rect2, tolerance: float) -> bool:
+	return (
+		inner.position.x >= outer.position.x - tolerance
+		and inner.position.y >= outer.position.y - tolerance
+		and inner.end.x <= outer.end.x + tolerance
+		and inner.end.y <= outer.end.y + tolerance
+	)
+
+
+func _runtime_exact(snap: Dictionary) -> bool:
+	if not _cells_eq(snap.get("board_cells", []), BattleRuntime.get_board_cells()):
+		return false
+	if BattleRuntime.get_rng_state() != int(snap.get("rng_state", -1)):
+		return false
+	if BattleRuntime.get_turn_count() != int(snap.get("turn_count", -1)):
+		return false
+	if str(BattleRuntime.get_phase()) != str(snap.get("phase", &"")):
+		return false
+	if BattleRuntime.get_selected_cell() != Vector2i(int(snap.get("selected_x", -9)), int(snap.get("selected_y", -9))):
+		return false
+	if BattleRuntime.get_last_match_count() != int(snap.get("last_match_count", -1)):
+		return false
+	if BattleRuntime.get_last_cascade_count() != int(snap.get("last_cascade_count", -1)):
+		return false
+	if str(BattleRuntime.get_session_area_id()) != str(snap.get("session_area_id", &"")):
+		return false
+	if str(BattleRuntime.get_session_stage_id()) != str(snap.get("session_stage_id", &"")):
+		return false
+	if str(BattleRuntime.get_session_leader_character_id()) != str(snap.get("session_leader_character_id", &"")):
+		return false
+	if not _party_eq(snap.get("session_party_character_ids", []), BattleRuntime.get_session_party_character_ids()):
+		return false
+	if str(BattleRuntime.get_last_message()) != str(snap.get("last_message", "")):
+		return false
+	return BattleResolutionEvent.events_equal(
+		snap.get("last_resolution_events", []) as Array,
+		BattleRuntime.get_last_resolution_events()
+	)
 
 
 func _make_no_match_board() -> Array[StringName]:

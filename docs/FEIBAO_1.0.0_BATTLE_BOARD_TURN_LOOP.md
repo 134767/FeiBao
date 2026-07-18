@@ -39,8 +39,11 @@ Same-session idempotent begin requires **all four** equal. Same area/stage with 
 - Phase/selection: READY → no selection; SELECTED → in-bounds; ERROR → (−1,−1) or in-bounds; **RESOLVING restore rejected**.
 - Inactive snapshot is **canonical**: empty session fields, empty board, phase INACTIVE, counters 0, events [], RNG=1.
 - Event equality uses deterministic deep compare (not Dictionary stringification).
-- Resolution events have a **strict schema validator**; unknown types / illegal kinds fail closed on snapshot restore.
+- Resolution events have a **strict schema validator** (fixed key sets, bounds, adjacency, unique cells, movement contracts).
+- **Sequence validation**: empty | sole `swap_rejected` | `swap`…cascades…`turn_completed` with contiguous cascade indices.
+- Snapshot restore validates events + counters; illegal data fail closed with zero signals.
 - Unknown event types never compare equal (no string-key fallback).
+- Keyboard: real KEY_ENTER / KEY_SPACE; board focus escape to Back/Leave via neighbor graph.
 
 ## Deterministic RNG
 
