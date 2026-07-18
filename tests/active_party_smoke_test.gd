@@ -566,6 +566,18 @@ func _run_party_screen_tests() -> void:
 	await _tree.process_frame
 	_assert_eq("ps_rem_refresh", int(screen.call("get_party_refresh_count_for_tests")), 1)
 	_assert_eq("ps_rem_size", int(screen.call("get_party_size")), 1)
+	# Focus must land on remaining party member, not the removed roster card.
+	_assert_eq("ps_rem_focus", str(screen.call("get_focused_id")), "feibao_dev")
+	_assert_true("ps_rem_focus_in_party", PlayerData.is_character_in_active_party(&"feibao_dev"))
+	_assert_true(
+		"ps_rem_detail_party",
+		str(screen.call("get_detail_status_text")).find("隊伍") >= 0
+		or str(screen.call("get_detail_status_text")).find("領隊") >= 0
+	)
+	# Action state: only leader left → remove disabled, move disabled.
+	_assert_true("ps_rem_after_remove_disabled", rem_btn.disabled)
+	_assert_true("ps_move_l_disabled_after", (screen.call("get_move_left_button") as Button).disabled)
+	_assert_true("ps_move_r_disabled_after", (screen.call("get_move_right_button") as Button).disabled)
 
 	# cannot remove last
 	_assert_true("ps_focus_dev", bool(screen.call("focus_character_for_test", &"feibao_dev")))
@@ -573,6 +585,7 @@ func _run_party_screen_tests() -> void:
 	screen.call("reset_party_refresh_count_for_tests")
 	screen.call("press_remove_for_test")
 	_assert_eq("ps_rem_last_refresh", int(screen.call("get_party_refresh_count_for_tests")), 0)
+	_assert_eq("ps_rem_last_focus", str(screen.call("get_focused_id")), "feibao_dev")
 
 	# reorder
 	PlayerData.grant_character(&"partner_b")
@@ -638,6 +651,7 @@ func _run_party_layout_tests() -> void:
 
 func _probe_party_layout(size: Vector2i) -> void:
 	var tag: String = "%dx%d" % [size.x, size.y]
+	var viewport_rect := Rect2(Vector2.ZERO, Vector2(size))
 	var host := SubViewportContainer.new()
 	host.custom_minimum_size = Vector2(size)
 	host.size = Vector2(size)
@@ -652,27 +666,99 @@ func _probe_party_layout(size: Vector2i) -> void:
 	sv.add_child(screen)
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	screen.call("configure_screen", &"party")
-	for _i in 4:
+	# Populate roster so multi-column layout is meaningful.
+	PlayerData.grant_character(&"partner_a")
+	PlayerData.grant_character(&"partner_b")
+	PlayerData.grant_character(&"partner_c")
+	for _i in 5:
 		await _tree.process_frame
+	screen.call("configure_screen", &"party")
+	for _i2 in 3:
+		await _tree.process_frame
+
 	var screen_rect: Rect2 = screen.get_global_rect()
+	_assert_true("pl_%s_screen_inside" % tag, _rect_h_inside(screen_rect, viewport_rect, 2.0))
+
+	# Strict roster columns: 360/390 → 2, 720 → 4 (not >=3).
 	var cols: int = int(screen.call("get_grid_columns"))
 	if size.x <= 400:
 		_assert_eq("pl_%s_cols" % tag, cols, 2)
 	if size.x >= 700:
-		_assert_true("pl_%s_cols_wide" % tag, cols >= 3)
-	var add_btn: Button = screen.call("get_add_button") as Button
-	if add_btn != null:
-		var ar: Rect2 = add_btn.get_global_rect()
-		_assert_true("pl_%s_add_h" % tag, ar.size.y >= 48.0)
-		_assert_true("pl_%s_add_no_h_overflow" % tag, ar.end.x <= screen_rect.end.x + 2.0)
+		_assert_eq("pl_%s_cols" % tag, cols, 4)
+
+	var page_scroll: ScrollContainer = screen.call("get_page_scroll") as ScrollContainer
+	_assert_true("pl_%s_page_scroll" % tag, page_scroll != null)
+
+	var controls: Array = [
+		["back", screen.call("get_back_button"), 48.0],
+		["add", screen.call("get_add_button"), 48.0],
+		["remove", screen.call("get_remove_button"), 48.0],
+		["move_l", screen.call("get_move_left_button"), 48.0],
+		["move_r", screen.call("get_move_right_button"), 48.0],
+	]
+	for entry in controls:
+		var key: String = str(entry[0])
+		var btn: Button = entry[1] as Button
+		var min_h: float = float(entry[2])
+		_assert_true("pl_%s_%s_exists" % [tag, key], btn != null)
+		if btn == null:
+			continue
+		_assert_true("pl_%s_%s_min" % [tag, key], btn.custom_minimum_size.y >= min_h)
+		# Ensure reachable via page scroll, then measure actual rect height.
+		screen.call("ensure_control_visible_for_test", btn)
+		await _tree.process_frame
+		var br: Rect2 = btn.get_global_rect()
+		_assert_true("pl_%s_%s_actual_h" % [tag, key], br.size.y >= min_h)
+		_assert_true("pl_%s_%s_no_h_overflow" % [tag, key], br.end.x <= screen_rect.end.x + 2.0)
+
 	var slots: Container = screen.call("get_party_slots_container") as Container
-	if slots != null and slots.get_child_count() > 0:
-		var slot0: Control = slots.get_child(0) as Control
-		if slot0 != null:
-			_assert_true("pl_%s_slot_h" % tag, slot0.custom_minimum_size.y >= 72.0 or slot0.size.y >= 72.0)
-	print("[INFO] party_layout_%s cols=%d" % [tag, cols])
+	_assert_true("pl_%s_slots" % tag, slots != null and slots.get_child_count() == 3)
+	if slots != null:
+		for si in slots.get_child_count():
+			var slot: Control = slots.get_child(si) as Control
+			if slot == null:
+				continue
+			screen.call("ensure_control_visible_for_test", slot)
+			await _tree.process_frame
+			var sr: Rect2 = slot.get_global_rect()
+			_assert_true(
+				"pl_%s_slot%d_h" % [tag, si],
+				slot.custom_minimum_size.y >= 72.0 and sr.size.y >= 72.0
+			)
+			_assert_true("pl_%s_slot%d_no_h_overflow" % [tag, si], sr.end.x <= screen_rect.end.x + 2.0)
+
+	var grid: GridContainer = screen.call("get_roster_grid") as GridContainer
+	if grid != null and grid.get_child_count() > 0:
+		var card: Control = grid.get_child(0) as Control
+		if card != null:
+			screen.call("ensure_control_visible_for_test", card)
+			await _tree.process_frame
+			var cr: Rect2 = card.get_global_rect()
+			_assert_true("pl_%s_roster_card_h" % tag, card.custom_minimum_size.y >= 72.0 and cr.size.y >= 72.0)
+			_assert_true("pl_%s_roster_card_no_h_overflow" % tag, cr.end.x <= screen_rect.end.x + 2.0)
+
+	# Reachability: after scrolling to actions, detail panel bottom is within page content.
+	var detail: PanelContainer = screen.call("get_detail_panel") as PanelContainer
+	if detail != null and page_scroll != null:
+		screen.call("ensure_control_visible_for_test", detail)
+		await _tree.process_frame
+		var dr: Rect2 = detail.get_global_rect()
+		_assert_true("pl_%s_detail_no_h_overflow" % tag, dr.end.x <= screen_rect.end.x + 3.0)
+		# Vertical reachability: control intersects scroll viewport after ensure_visible.
+		var scroll_rect: Rect2 = page_scroll.get_global_rect()
+		var intersects: bool = dr.intersects(scroll_rect) or absf(dr.position.y - scroll_rect.position.y) < scroll_rect.size.y + 4.0
+		_assert_true("pl_%s_detail_reachable" % tag, intersects)
+
+	print("[INFO] party_layout_%s cols=%d scroll=%s" % [tag, cols, str(page_scroll != null)])
 	host.queue_free()
 	await _tree.process_frame
+
+
+func _rect_h_inside(inner: Rect2, outer: Rect2, tolerance: float = 1.0) -> bool:
+	return (
+		inner.position.x >= outer.position.x - tolerance
+		and inner.end.x <= outer.end.x + tolerance
+	)
 
 
 func _assert_true(name: String, cond: bool) -> void:

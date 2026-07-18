@@ -65,6 +65,8 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 
 - Profile schema **2**; schema 1 loads with lazy migration (no boot write)
 - Dedicated PartyScreen; party mutations via `PlayerData` only
+- PartyScreen uses page-level vertical scroll for narrow reachability
+- Roster columns contract: 360→2, 390→2, 720→4
 - See `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`
 
 ## Git Branch & PR Rules

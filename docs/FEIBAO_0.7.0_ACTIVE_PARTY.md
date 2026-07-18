@@ -48,6 +48,9 @@ Version **0.7.0** upgrades the party module from a shared placeholder to a dedic
 - Focus, leader, and representative are separate concepts
 - Single full-refresh path via `profile_changed`
 - Touch targets: actions ≥48px, slots/cards ≥72px
+- **Page-level vertical scroll** (`PageScroll`) so 360×640 / 390×844 can reach all actions
+- Roster columns: **2 / 2 / 4** on 360 / 390 / 720 viewports (strict)
+- UI remove pre-selects the next party focus before mutation so the single rebuild stays consistent
 
 ## Explicit exclusions
 

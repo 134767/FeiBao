@@ -17,17 +17,20 @@ const MSG_MOVED: String = "已調整隊伍順序"
 const MSG_FULL: String = "隊伍已滿"
 const MSG_SAVE_FAIL: String = "無法儲存隊伍編成，請再試一次"
 const MSG_MIGRATION_HINT: String = "舊版存檔已相容載入，將於下次成功儲存時更新格式"
-const CARD_MIN_WIDTH: float = 150.0
 const SLOT_COUNT: int = 3
+## Viewport width threshold for 4-column roster (720 design); below → 2 columns.
+const ROSTER_WIDE_MIN_WIDTH: float = 600.0
 
 @onready var _title_label: Label = %TitleLabel
 @onready var _back_button: Button = %BackButton
+@onready var _page_scroll: ScrollContainer = %PageScroll
+@onready var _page_content: Control = %PageContent
 @onready var _party_summary_label: Label = %PartySummaryLabel
 @onready var _leader_summary_label: Label = %LeaderSummaryLabel
 @onready var _party_slots_container: Container = %PartySlotsContainer
 @onready var _roster_summary_label: Label = %RosterSummaryLabel
-@onready var _roster_scroll: ScrollContainer = %RosterScroll
 @onready var _roster_grid: GridContainer = %RosterGrid
+@onready var _detail_panel: PanelContainer = %DetailPanel
 @onready var _detail_name_label: Label = %DetailNameLabel
 @onready var _detail_status_label: Label = %DetailStatusLabel
 @onready var _add_button: Button = %AddButton
@@ -410,17 +413,37 @@ func _on_remove_pressed() -> void:
 		return
 	var removing: StringName = _focused_id
 	var idx: int = _party_ids.find(removing)
+	# Pre-select fallback focus BEFORE mutation so the single profile_changed
+	# rebuild highlights the surviving party member (not the removed roster card).
+	var prior_focus: StringName = _focused_id
+	if idx >= 0 and _party_ids.size() > 1:
+		var provisional: Array[StringName] = []
+		for id in _party_ids:
+			if id != removing:
+				provisional.append(id)
+		if idx < provisional.size():
+			_focused_id = provisional[idx]
+		elif not provisional.is_empty():
+			_focused_id = provisional[0]
 	var result: Dictionary = PlayerData.remove_party_member(removing)
 	if not bool(result.get("ok", false)):
+		_focused_id = prior_focus
 		_set_mutation_message(MSG_SAVE_FAIL)
+		# No full rebuild on failure; keep badges as-is.
 		return
 	if bool(result.get("changed", false)):
-		# Prefer next remaining member or new leader after signal refresh.
+		# Align with authoritative post-save party (defensive; should match provisional).
 		var next_ids: Array = result.get("active_party_character_ids", []) as Array
-		if idx >= 0 and idx < next_ids.size():
-			_focused_id = next_ids[idx] as StringName
-		elif not next_ids.is_empty():
+		var still_valid: bool = false
+		for item in next_ids:
+			if item == _focused_id:
+				still_valid = true
+				break
+		if not still_valid and not next_ids.is_empty():
 			_focused_id = next_ids[0] as StringName
+			# Light focus-only sync if provisional missed; does not rebuild tree again.
+			_sync_focus_visuals()
+			_update_detail_and_actions()
 		_set_mutation_message(MSG_REMOVED)
 		party_member_removed.emit(removing)
 
@@ -477,14 +500,15 @@ func _hide_error() -> void:
 func _refresh_columns() -> void:
 	if _roster_grid == null:
 		return
-	var width: float = 0.0
-	if _roster_scroll != null:
-		width = _roster_scroll.size.x
-	if width <= 1.0:
-		width = size.x
+	# Strict contract: narrow phones 2 columns; design-width (720) → exactly 4.
+	var width: float = size.x
+	if width <= 1.0 and _page_content != null:
+		width = _page_content.size.x
+	if width <= 1.0 and _page_scroll != null:
+		width = _page_scroll.size.x
 	var cols: int = 2
-	if width >= 520.0:
-		cols = maxi(3, int(floor(width / CARD_MIN_WIDTH)))
+	if width >= ROSTER_WIDE_MIN_WIDTH:
+		cols = 4
 	_roster_grid.columns = cols
 
 
@@ -563,6 +587,18 @@ func get_mutation_message() -> String:
 	return _mutation_message_label.text
 
 
+func get_detail_status_text() -> String:
+	if _detail_status_label == null:
+		return ""
+	return _detail_status_label.text
+
+
+func get_detail_name_text() -> String:
+	if _detail_name_label == null:
+		return ""
+	return _detail_name_label.text
+
+
 func get_roster_grid() -> GridContainer:
 	return _roster_grid
 
@@ -571,10 +607,34 @@ func get_party_slots_container() -> Container:
 	return _party_slots_container
 
 
+func get_page_scroll() -> ScrollContainer:
+	return _page_scroll
+
+
+func get_detail_panel() -> PanelContainer:
+	return _detail_panel
+
+
 func get_grid_columns() -> int:
 	if _roster_grid == null:
 		return 0
 	return _roster_grid.columns
+
+
+## Scroll the page so target is visible (for narrow-viewport reachability).
+func ensure_control_visible_for_test(control: Control) -> void:
+	if _page_scroll == null or control == null or not is_instance_valid(control):
+		return
+	# Prefer ensure_control_visible when available (Godot 4 ScrollContainer).
+	if _page_scroll.has_method("ensure_control_visible"):
+		_page_scroll.ensure_control_visible(control)
+		return
+	var content: Control = _page_content
+	if content == null:
+		return
+	var local_y: float = control.get_global_rect().position.y - content.get_global_rect().position.y
+	var max_scroll: int = int(maxi(0.0, content.size.y - _page_scroll.size.y))
+	_page_scroll.scroll_vertical = clampi(int(local_y - 8.0), 0, max_scroll)
 
 
 func reset_party_refresh_count_for_tests() -> void:
