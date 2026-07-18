@@ -68,6 +68,8 @@ var _load_error: String = ""
 var _catalog_source_path: String = CharacterCatalog.DEFAULT_PATH
 var _player_data_ok: bool = true
 var _player_data_error: String = ""
+## Test-only counter for ownership full-refresh calls (not shown in UI).
+var _ownership_refresh_count_for_tests: int = 0
 
 
 func _ready() -> void:
@@ -114,12 +116,11 @@ func _bind_player_data_signals() -> void:
 		return
 	if not is_instance_valid(PlayerData):
 		return
+	# Single authoritative UI refresh path: profile_changed only.
+	# character_granted / selected_character_changed still fire from PlayerData
+	# but must not each rebuild the ownership UI.
 	if not PlayerData.profile_changed.is_connected(_on_player_profile_changed):
 		PlayerData.profile_changed.connect(_on_player_profile_changed)
-	if not PlayerData.character_granted.is_connected(_on_character_granted):
-		PlayerData.character_granted.connect(_on_character_granted)
-	if not PlayerData.selected_character_changed.is_connected(_on_selected_character_changed):
-		PlayerData.selected_character_changed.connect(_on_selected_character_changed)
 	_player_data_signals_bound = true
 
 
@@ -129,10 +130,6 @@ func _unbind_player_data_signals() -> void:
 	if is_instance_valid(PlayerData):
 		if PlayerData.profile_changed.is_connected(_on_player_profile_changed):
 			PlayerData.profile_changed.disconnect(_on_player_profile_changed)
-		if PlayerData.character_granted.is_connected(_on_character_granted):
-			PlayerData.character_granted.disconnect(_on_character_granted)
-		if PlayerData.selected_character_changed.is_connected(_on_selected_character_changed):
-			PlayerData.selected_character_changed.disconnect(_on_selected_character_changed)
 	_player_data_signals_bound = false
 
 
@@ -508,21 +505,24 @@ func _on_set_representative_pressed() -> void:
 
 	var result: Dictionary = PlayerData.select_character(_focused_id)
 	if not bool(result.get("ok", false)):
+		# Save/domain failure: profile and badges unchanged — message only, no full rebuild.
 		_set_mutation_message(MSG_REP_SAVE_FAIL)
-		# Memory + disk unchanged on save failure; re-sync badges from live profile.
-		_sync_ownership_from_player_data()
-		_refresh_ownership_ui_preserve_focus()
 		return
 
 	if bool(result.get("changed", false)):
-		_sync_ownership_from_player_data()
-		_refresh_ownership_ui_preserve_focus()
+		# UI rebuild is owned exclusively by profile_changed (emitted by PlayerData).
 		_set_mutation_message(MSG_REP_SUCCESS)
-		representative_changed.emit(_representative_id)
+		var actual_rep: StringName = PlayerData.get_selected_character_id()
+		# Defensive fallback only if signal path did not sync representative.
+		if _representative_id != actual_rep:
+			_sync_ownership_from_player_data()
+			_refresh_ownership_ui_preserve_focus()
+		representative_changed.emit(actual_rep)
 	# changed=false: no error UI rewrite
 
 
 func _refresh_ownership_ui_preserve_focus() -> void:
+	_ownership_refresh_count_for_tests += 1
 	var keep_focus: StringName = _focused_id
 	_apply_filter(_current_query())
 	if _has_visible_id(keep_focus):
@@ -538,18 +538,12 @@ func _on_player_profile_changed(_revision: int) -> void:
 	_refresh_ownership_ui_preserve_focus()
 
 
-func _on_character_granted(_character_id: StringName, _revision: int) -> void:
-	if not _ready_done or not _configured:
-		return
-	_sync_ownership_from_player_data()
-	_refresh_ownership_ui_preserve_focus()
+func reset_ownership_refresh_count_for_tests() -> void:
+	_ownership_refresh_count_for_tests = 0
 
 
-func _on_selected_character_changed(_character_id: StringName, _revision: int) -> void:
-	if not _ready_done or not _configured:
-		return
-	_sync_ownership_from_player_data()
-	_refresh_ownership_ui_preserve_focus()
+func get_ownership_refresh_count_for_tests() -> int:
+	return _ownership_refresh_count_for_tests
 
 
 func _set_mutation_message(text: String) -> void:

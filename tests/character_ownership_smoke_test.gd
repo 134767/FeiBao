@@ -18,6 +18,7 @@ func run_all() -> void:
 	_run_player_data_ownership_tests()
 	_run_card_ownership_tests()
 	await _run_screen_ownership_tests()
+	await _run_single_refresh_tests()
 	await _run_ownership_layout_tests()
 	_cleanup_all_cases()
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
@@ -435,19 +436,15 @@ func _run_screen_ownership_tests() -> void:
 	_assert_eq("own_set_rep_signal", rep_events.size(), 1)
 	_assert_eq("own_set_rep_signal_id", str(rep_events[0]) if rep_events.size() > 0 else "", "partner_a")
 
-	# Filter buttons touch targets
+	# Filter buttons touch targets (strict min height 48; no 40/44 fallback).
 	var fb_all: Button = screen.call("get_filter_all_button") as Button
 	var fb_own: Button = screen.call("get_filter_owned_button") as Button
 	var fb_un: Button = screen.call("get_filter_unowned_button") as Button
-	_assert_true("own_filter_all_h", fb_all != null and fb_all.custom_minimum_size.y >= 44.0)
-	_assert_true("own_filter_owned_h", fb_own != null and fb_own.custom_minimum_size.y >= 44.0)
-	_assert_true("own_filter_unowned_h", fb_un != null and fb_un.custom_minimum_size.y >= 44.0)
+	_assert_true("own_filter_all_min_h", fb_all != null and fb_all.custom_minimum_size.y >= 48.0)
+	_assert_true("own_filter_owned_min_h", fb_own != null and fb_own.custom_minimum_size.y >= 48.0)
+	_assert_true("own_filter_unowned_min_h", fb_un != null and fb_un.custom_minimum_size.y >= 48.0)
 
-	# Save failure UI preserves badges
-	PlayerData.set_save_override_for_tests(func(_p: String, _t: String) -> Dictionary:
-		return {"ok": false, "error": "forced"}
-	)
-	# Grant partner_b first so we can attempt select after clearing override... instead fail select of feibao_dev switch:
+	# Save failure UI preserves badges (message only; no full ownership rebuild).
 	PlayerData.clear_save_override_for_tests()
 	PlayerData.grant_character(&"partner_b")
 	await _tree.process_frame
@@ -456,17 +453,119 @@ func _run_screen_ownership_tests() -> void:
 		return {"ok": false, "error": "forced"}
 	)
 	var rep_before_fail: String = str(screen.call("get_representative_id"))
+	screen.call("reset_ownership_refresh_count_for_tests")
 	screen.call("press_set_representative_for_test")
 	await _tree.process_frame
 	_assert_eq("own_fail_rep_preserved", str(screen.call("get_representative_id")), rep_before_fail)
 	_assert_eq("own_fail_profile_rep", str(PlayerData.get_selected_character_id()), rep_before_fail)
 	_assert_true("own_fail_msg", str(screen.call("get_mutation_message")).find("無法儲存") >= 0)
+	_assert_eq("own_fail_refresh_zero", int(screen.call("get_ownership_refresh_count_for_tests")), 0)
 	PlayerData.clear_save_override_for_tests()
 
 	# Idempotent signal binding: re-configure should not crash / duplicate-bind fatally
 	_assert_true("own_reconfigure", bool(screen.call("configure_screen", &"character")))
 	await _tree.process_frame
 	_assert_eq("own_reconfigure_total", int(screen.call("get_total_catalog_count")), 6)
+
+	screen.queue_free()
+	await _tree.process_frame
+
+
+func _run_single_refresh_tests() -> void:
+	_begin_case("single_refresh")
+	PlayerData.initialize()
+	_nav().call("reset", &"login")
+	var packed: PackedScene = load("res://scenes/screens/character/character_screen.tscn") as PackedScene
+	var screen: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	_assert_true("refresh_screen_cfg", bool(screen.call("configure_screen", &"character")))
+	await _tree.process_frame
+	await _tree.process_frame
+	_assert_true("refresh_screen_load_ok", bool(screen.call("is_load_ok")))
+	_assert_eq("refresh_default_owned", int(screen.call("get_owned_count")), 1)
+
+	# External grant changed → exactly one ownership full refresh.
+	screen.call("reset_ownership_refresh_count_for_tests")
+	var grant_r: Dictionary = PlayerData.grant_character(&"partner_a")
+	_assert_true("refresh_grant_ok", bool(grant_r.get("ok", false)))
+	_assert_true("refresh_grant_changed", bool(grant_r.get("changed", false)))
+	_assert_eq("refresh_grant_count", int(screen.call("get_ownership_refresh_count_for_tests")), 1)
+	_assert_eq("refresh_grant_owned", int(screen.call("get_owned_count")), 2)
+
+	# Duplicate grant → zero refresh.
+	screen.call("reset_ownership_refresh_count_for_tests")
+	var grant_dup: Dictionary = PlayerData.grant_character(&"partner_a")
+	_assert_true("refresh_dup_grant_ok", bool(grant_dup.get("ok", false)))
+	_assert_true("refresh_dup_grant_changed_false", bool(grant_dup.get("changed", true)) == false)
+	_assert_eq("refresh_dup_grant_count", int(screen.call("get_ownership_refresh_count_for_tests")), 0)
+
+	# External select changed → exactly one refresh.
+	screen.call("reset_ownership_refresh_count_for_tests")
+	var sel_r: Dictionary = PlayerData.select_character(&"partner_a")
+	_assert_true("refresh_select_ok", bool(sel_r.get("ok", false)))
+	_assert_true("refresh_select_changed", bool(sel_r.get("changed", false)))
+	_assert_eq("refresh_select_count", int(screen.call("get_ownership_refresh_count_for_tests")), 1)
+	_assert_eq("refresh_select_rep", str(screen.call("get_representative_id")), "partner_a")
+	# Detail representative text applies to focused card; focus the new rep to assert badge text.
+	_assert_true("refresh_select_focus_a", bool(screen.call("select_character_for_test", &"partner_a")))
+	_assert_eq("refresh_select_detail_rep", str(screen.call("get_detail_representative_text")), "目前代表角色")
+
+	# Duplicate select → zero refresh.
+	screen.call("reset_ownership_refresh_count_for_tests")
+	var sel_dup: Dictionary = PlayerData.select_character(&"partner_a")
+	_assert_true("refresh_dup_select_ok", bool(sel_dup.get("ok", false)))
+	_assert_true("refresh_dup_select_changed_false", bool(sel_dup.get("changed", true)) == false)
+	_assert_eq("refresh_dup_select_count", int(screen.call("get_ownership_refresh_count_for_tests")), 0)
+
+	# Button set-representative: hold partner_b, focus, press → exactly one refresh.
+	PlayerData.grant_character(&"partner_b")
+	await _tree.process_frame
+	screen.call("set_ownership_filter_for_test", &"ALL")
+	screen.call("set_search_text_for_test", "")
+	_assert_true("refresh_focus_b", bool(screen.call("select_character_for_test", &"partner_b")))
+	var rep_events: Array = []
+	screen.representative_changed.connect(func(cid: StringName) -> void:
+		rep_events.append(str(cid))
+	)
+	screen.call("reset_ownership_refresh_count_for_tests")
+	screen.call("press_set_representative_for_test")
+	await _tree.process_frame
+	_assert_eq("refresh_button_select_count", int(screen.call("get_ownership_refresh_count_for_tests")), 1)
+	_assert_eq("refresh_button_rep", str(screen.call("get_representative_id")), "partner_b")
+	_assert_eq("refresh_button_signal_count", rep_events.size(), 1)
+	_assert_eq("refresh_button_signal_id", str(rep_events[0]) if rep_events.size() > 0 else "", "partner_b")
+	_assert_true("refresh_button_msg", str(screen.call("get_mutation_message")).find("代表") >= 0)
+
+	# Save failure select → zero refresh; badges unchanged.
+	var rep_before: String = str(screen.call("get_representative_id"))
+	var focus_before: String = str(screen.call("get_focused_id"))
+	PlayerData.set_save_override_for_tests(func(_p: String, _t: String) -> Dictionary:
+		return {"ok": false, "error": "forced"}
+	)
+	# Focus owned non-rep partner_a so select would change if save worked.
+	_assert_true("refresh_fail_focus_a", bool(screen.call("select_character_for_test", &"partner_a")))
+	screen.call("reset_ownership_refresh_count_for_tests")
+	screen.call("press_set_representative_for_test")
+	await _tree.process_frame
+	_assert_eq("refresh_fail_count", int(screen.call("get_ownership_refresh_count_for_tests")), 0)
+	_assert_eq("refresh_fail_rep", str(screen.call("get_representative_id")), rep_before)
+	_assert_eq("refresh_fail_profile", str(PlayerData.get_selected_character_id()), rep_before)
+	_assert_eq("refresh_fail_focus", str(screen.call("get_focused_id")), "partner_a")
+	_assert_true("refresh_fail_msg", str(screen.call("get_mutation_message")).find("無法儲存") >= 0)
+	PlayerData.clear_save_override_for_tests()
+
+	# Reconfigure idempotent binding: next changed mutation still exactly one refresh.
+	_assert_true("refresh_reconfigure", bool(screen.call("configure_screen", &"character")))
+	await _tree.process_frame
+	_assert_true("refresh_reconfigure2", bool(screen.call("configure_screen", &"character")))
+	await _tree.process_frame
+	# Ensure partner_c not owned yet for a clean grant change.
+	screen.call("reset_ownership_refresh_count_for_tests")
+	var grant_c: Dictionary = PlayerData.grant_character(&"partner_c")
+	_assert_true("refresh_reconfig_grant_ok", bool(grant_c.get("ok", false)))
+	_assert_true("refresh_reconfig_grant_changed", bool(grant_c.get("changed", false)))
+	_assert_eq("refresh_reconfig_count", int(screen.call("get_ownership_refresh_count_for_tests")), 1)
+	_assert_eq("refresh_reconfig_owned", int(screen.call("get_owned_count")), 4)
 
 	screen.queue_free()
 	await _tree.process_frame
@@ -514,30 +613,76 @@ func _probe_ownership_layout(size: Vector2i) -> void:
 	var cols: int = int(screen.call("get_grid_columns"))
 	_assert_true("own_layout_%s_cols_pos" % tag, cols >= 2)
 	if size.x <= 400:
-		_assert_true("own_layout_%s_cols_narrow" % tag, cols >= 2 and cols <= 3)
+		_assert_eq("own_layout_%s_cols_narrow" % tag, cols, 2)
 	if size.x >= 700:
-		_assert_true("own_layout_%s_cols_wide" % tag, cols >= 3)
+		_assert_eq("own_layout_%s_cols_wide" % tag, cols, 4)
 
-	var fb: Button = screen.call("get_filter_all_button") as Button
-	if fb != null:
-		var fr: Rect2 = fb.get_global_rect()
-		_assert_true("own_layout_%s_filter_h" % tag, fr.size.y >= 40.0 or fb.custom_minimum_size.y >= 44.0)
-		_assert_true("own_layout_%s_filter_inside" % tag, _rect_is_inside(fr, screen_rect, 2.0))
-		_assert_true("own_layout_%s_filter_no_overflow" % tag, fr.end.x <= screen_rect.end.x + 2.0)
+	# Strict touch targets: actual rect height >= 48 for all three filters (no 40/44 OR).
+	var fb_all: Button = screen.call("get_filter_all_button") as Button
+	var fb_own: Button = screen.call("get_filter_owned_button") as Button
+	var fb_un: Button = screen.call("get_filter_unowned_button") as Button
+	_assert_true("own_layout_%s_filter_all_min" % tag, fb_all != null and fb_all.custom_minimum_size.y >= 48.0)
+	_assert_true("own_layout_%s_filter_owned_min" % tag, fb_own != null and fb_own.custom_minimum_size.y >= 48.0)
+	_assert_true("own_layout_%s_filter_unowned_min" % tag, fb_un != null and fb_un.custom_minimum_size.y >= 48.0)
+	if fb_all != null:
+		var fr_all: Rect2 = fb_all.get_global_rect()
+		_assert_true("own_layout_%s_filter_all_h" % tag, fr_all.size.y >= 48.0)
+		_assert_true("own_layout_%s_filter_all_inside" % tag, _rect_is_inside(fr_all, screen_rect, 2.0))
+		_assert_true("own_layout_%s_filter_all_no_h_overflow" % tag, fr_all.end.x <= screen_rect.end.x + 2.0)
+	if fb_own != null:
+		var fr_own: Rect2 = fb_own.get_global_rect()
+		_assert_true("own_layout_%s_filter_owned_h" % tag, fr_own.size.y >= 48.0)
+		_assert_true("own_layout_%s_filter_owned_inside" % tag, _rect_is_inside(fr_own, screen_rect, 2.0))
+		_assert_true("own_layout_%s_filter_owned_no_h_overflow" % tag, fr_own.end.x <= screen_rect.end.x + 2.0)
+	if fb_un != null:
+		var fr_un: Rect2 = fb_un.get_global_rect()
+		_assert_true("own_layout_%s_filter_unowned_h" % tag, fr_un.size.y >= 48.0)
+		_assert_true("own_layout_%s_filter_unowned_inside" % tag, _rect_is_inside(fr_un, screen_rect, 2.0))
+		_assert_true("own_layout_%s_filter_unowned_no_h_overflow" % tag, fr_un.end.x <= screen_rect.end.x + 2.0)
 
 	var rb: Button = screen.call("get_set_representative_button") as Button
 	if rb != null:
 		var rr: Rect2 = rb.get_global_rect()
-		_assert_true("own_layout_%s_rep_btn_h" % tag, rb.custom_minimum_size.y >= 48.0 or rr.size.y >= 44.0)
-		_assert_true("own_layout_%s_rep_btn_no_overflow" % tag, rr.end.x <= screen_rect.end.x + 2.0)
+		_assert_true("own_layout_%s_rep_btn_min" % tag, rb.custom_minimum_size.y >= 48.0)
+		_assert_true("own_layout_%s_rep_btn_h" % tag, rr.size.y >= 48.0)
+		# Horizontal containment required; vertical may sit in DetailScroll (scrollable).
+		_assert_true("own_layout_%s_rep_btn_no_h_overflow" % tag, rr.end.x <= screen_rect.end.x + 2.0)
+		_assert_true("own_layout_%s_rep_btn_x_inside" % tag, rr.position.x >= screen_rect.position.x - 2.0)
+		var detail: PanelContainer = screen.call("get_detail_panel") as PanelContainer
+		if detail != null:
+			var dr: Rect2 = detail.get_global_rect()
+			_assert_true("own_layout_%s_detail_no_h_overflow" % tag, dr.end.x <= screen_rect.end.x + 3.0)
+			_assert_true("own_layout_%s_detail_inside_h" % tag, dr.position.x >= screen_rect.position.x - 3.0)
 
 	var scroll: ScrollContainer = screen.call("get_card_scroll") as ScrollContainer
 	if scroll != null:
 		var sr: Rect2 = scroll.get_global_rect()
 		_assert_true("own_layout_%s_scroll_inside" % tag, _rect_is_inside(sr, screen_rect, 3.0))
-		_assert_true("own_layout_%s_scroll_no_overflow" % tag, sr.end.x <= screen_rect.end.x + 3.0)
+		_assert_true("own_layout_%s_scroll_no_h_overflow" % tag, sr.end.x <= screen_rect.end.x + 3.0)
 
-	print("[INFO] own_layout_%s cols=%d cards=%d" % [tag, cols, int(screen.call("get_card_count"))])
+	var h_overflow: bool = false
+	if fb_all != null and fb_all.get_global_rect().end.x > screen_rect.end.x + 2.0:
+		h_overflow = true
+	if fb_own != null and fb_own.get_global_rect().end.x > screen_rect.end.x + 2.0:
+		h_overflow = true
+	if fb_un != null and fb_un.get_global_rect().end.x > screen_rect.end.x + 2.0:
+		h_overflow = true
+	if rb != null and rb.get_global_rect().end.x > screen_rect.end.x + 2.0:
+		h_overflow = true
+	_assert_true("own_layout_%s_horizontal_overflow_false" % tag, h_overflow == false)
+
+	print(
+		"[INFO] own_layout_%s cols=%d cards=%d filter_h=%.1f,%.1f,%.1f rep_h=%.1f"
+		% [
+			tag,
+			cols,
+			int(screen.call("get_card_count")),
+			fb_all.get_global_rect().size.y if fb_all else -1.0,
+			fb_own.get_global_rect().size.y if fb_own else -1.0,
+			fb_un.get_global_rect().size.y if fb_un else -1.0,
+			rb.get_global_rect().size.y if rb else -1.0,
+		]
+	)
 	host.queue_free()
 	await _tree.process_frame
 

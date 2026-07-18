@@ -155,15 +155,7 @@ func get_owned_character_ids() -> Array[StringName]:
 
 func is_known_character(character_id: StringName) -> bool:
 	var catalog: Dictionary = CharacterCatalog.load_default()
-	if not bool(catalog.get("ok", false)):
-		return false
-	var id_str: String = String(character_id)
-	if id_str.is_empty():
-		return false
-	for item in catalog.get("characters", []):
-		if item is CharacterDefinition and (item as CharacterDefinition).get_id() == character_id:
-			return true
-	return false
+	return _catalog_contains_character(catalog, character_id)
 
 
 func get_known_owned_count() -> int:
@@ -179,6 +171,18 @@ func get_known_owned_count() -> int:
 		if known.has(str(id)):
 			count += 1
 	return count
+
+
+func _catalog_contains_character(catalog: Dictionary, character_id: StringName) -> bool:
+	if not bool(catalog.get("ok", false)):
+		return false
+	var id_str: String = String(character_id)
+	if id_str.is_empty():
+		return false
+	for item in catalog.get("characters", []):
+		if item is CharacterDefinition and (item as CharacterDefinition).get_id() == character_id:
+			return true
+	return false
 
 
 func get_load_state() -> StringName:
@@ -266,7 +270,7 @@ func _mutate_character_ownership(character_id: StringName, mode: StringName) -> 
 		base_result["error"] = ERR_CATALOG_LOAD
 		return base_result
 
-	if not is_known_character(character_id):
+	if not _catalog_contains_character(catalog, character_id):
 		base_result["error"] = ERR_UNKNOWN_CHARACTER
 		return base_result
 

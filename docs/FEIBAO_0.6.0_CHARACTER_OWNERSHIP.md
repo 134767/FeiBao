@@ -94,7 +94,11 @@ Unowned cards remain pressable for detail inspect.
 - Detail action: 設為代表角色 (owned only; disabled when already representative or unowned)
 - Focus vs representative are separate fields
 - Initial focus prefers current representative when visible
-- Subscribes to PlayerData signals; bindings are idempotent and cleared on exit
+- Ownership UI full refresh is driven **only** by `PlayerData.profile_changed` (single path)
+- `character_granted` / `selected_character_changed` still emit from PlayerData for domain listeners, but CharacterScreen does not rebuild UI on them
+- Successful set-representative relies on that single signal; failures update the mutation message only
+- Filter buttons and set-representative use a minimum touch height of **48px**
+- Signal bindings are idempotent and cleared on exit
 
 ## Explicit Exclusions
 
