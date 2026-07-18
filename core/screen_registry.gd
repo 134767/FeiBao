@@ -18,6 +18,7 @@ const KIND_HOME: StringName = &"home"
 const KIND_MODULE: StringName = &"module"
 
 const PATH_MODULE: String = "res://scenes/screens/module/module_screen.tscn"
+const PATH_CHARACTER_SCREEN: String = "res://scenes/screens/character/character_screen.tscn"
 
 ## Fixed registration order (not Dictionary key order).
 const _ORDERED_IDS: Array[StringName] = [
@@ -67,7 +68,7 @@ const _SCREENS: Dictionary = {
 		"back_fallback": SCREEN_LOBBY,
 	},
 	SCREEN_CHARACTER: {
-		"path": PATH_MODULE,
+		"path": PATH_CHARACTER_SCREEN,
 		"title": "角色",
 		"kind": KIND_MODULE,
 		"back_fallback": SCREEN_LOBBY,
@@ -200,8 +201,17 @@ static func validate_metadata() -> bool:
 		if get_back_fallback(module_id) != SCREEN_LOBBY:
 			push_error("ScreenRegistry: module fallback must be lobby: %s" % str(module_id))
 			return false
-		if get_scene_path(module_id) != PATH_MODULE:
-			push_error("ScreenRegistry: module path must be shared ModuleScreen: %s" % str(module_id))
+		var module_path: String = get_scene_path(module_id)
+		if module_path.is_empty():
+			push_error("ScreenRegistry: empty module path: %s" % str(module_id))
+			return false
+		# Character uses a dedicated catalog screen; other modules stay on shared placeholder.
+		if module_id == SCREEN_CHARACTER:
+			if module_path != PATH_CHARACTER_SCREEN:
+				push_error("ScreenRegistry: character must use dedicated path")
+				return false
+		elif module_path != PATH_MODULE:
+			push_error("ScreenRegistry: placeholder module path must be shared ModuleScreen: %s" % str(module_id))
 			return false
 
 	if get_kind(SCREEN_BOOT) != KIND_SYSTEM:

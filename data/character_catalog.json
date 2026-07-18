@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "catalog_kind": "development_seed",
+  "characters": [
+    {
+      "id": "feibao_dev",
+      "display_name": "飛寶（開發樣本）",
+      "species": "原型精靈",
+      "summary": "專案吉祥物占位，非正式世界觀角色。",
+      "description": "此為 FeiBao 0.4.0 開發用角色圖鑑樣本，僅供 UI 與資料契約驗證。正式角色資料將於後續版本替換。",
+      "tags": ["development", "mascot"],
+      "sort_order": 0,
+      "portrait_path": "",
+      "is_development_seed": true
+    },
+    {
+      "id": "partner_a",
+      "display_name": "夥伴 A",
+      "species": "測試生物",
+      "summary": "開發樣本夥伴 A，用於清單與搜尋驗證。",
+      "description": "夥伴 A 是 development seed 角色，沒有戰鬥數值、等級或擁有狀態。僅作為圖鑑介面測試資料。",
+      "tags": ["development", "ally"],
+      "sort_order": 1,
+      "portrait_path": "",
+      "is_development_seed": true
+    },
+    {
+      "id": "partner_b",
+      "display_name": "夥伴 B",
+      "species": "測試生物",
+      "summary": "開發樣本夥伴 B，用於標籤篩選驗證。",
+      "description": "夥伴 B 同樣為非正式開發樣本。標籤與物種欄位僅供搜尋與卡片顯示測試。",
+      "tags": ["development", "scout"],
+      "sort_order": 2,
+      "portrait_path": "",
+      "is_development_seed": true
+    },
+    {
+      "id": "partner_c",
+      "display_name": "夥伴 C",
+      "species": "樣本物種 C",
+      "summary": "開發樣本夥伴 C，用於詳情面板驗證。",
+      "description": "夥伴 C 的描述文字可換行顯示。內容不代表正式世界觀或可遊玩戰鬥單位。",
+      "tags": ["development", "support"],
+      "sort_order": 3,
+      "portrait_path": "",
+      "is_development_seed": true
+    },
+    {
+      "id": "partner_d",
+      "display_name": "夥伴 D",
+      "species": "樣本物種 D",
+      "summary": "開發樣本夥伴 D，用於響應式欄位驗證。",
+      "description": "夥伴 D 用於確認多張角色卡在不同 viewport 寬度下的排列與觸控目標。非正式可收集角色。",
+      "tags": ["development", "tank"],
+      "sort_order": 4,
+      "portrait_path": "",
+      "is_development_seed": true
+    },
+    {
+      "id": "partner_e",
+      "display_name": "夥伴 E",
+      "species": "樣本物種 E",
+      "summary": "開發樣本夥伴 E，用於空狀態與還原清單驗證。",
+      "description": "夥伴 E 是六筆 development seed 中的最後一筆。未來正式資料應以新 JSON 完整替換，而非就地改寫為正式內容。",
+      "tags": ["development", "ranged"],
+      "sort_order": 5,
+      "portrait_path": "",
+      "is_development_seed": true
+    }
+  ]
+}

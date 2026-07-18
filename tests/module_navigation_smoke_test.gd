@@ -54,17 +54,22 @@ func _run_registry_tests() -> void:
 		&"farm": "農場",
 		&"settings": "設定",
 	}
+	const PATH_MODULE: String = "res://scenes/screens/module/module_screen.tscn"
+	const PATH_CHARACTER: String = "res://scenes/screens/character/character_screen.tscn"
 	for mid in modules:
 		_assert_eq("registry_title_%s" % str(mid), ScreenRegistry.get_display_title(mid), titles[mid])
 		_assert_eq("registry_kind_%s" % str(mid), str(ScreenRegistry.get_kind(mid)), "module")
 		_assert_eq("registry_fallback_%s" % str(mid), str(ScreenRegistry.get_back_fallback(mid)), "lobby")
-		_assert_eq(
-			"registry_path_%s" % str(mid),
-			ScreenRegistry.get_scene_path(mid),
-			"res://scenes/screens/module/module_screen.tscn"
-		)
+		var expected_path: String = PATH_CHARACTER if mid == &"character" else PATH_MODULE
+		_assert_eq("registry_path_%s" % str(mid), ScreenRegistry.get_scene_path(mid), expected_path)
 		_assert_true("registry_path_exists_%s" % str(mid), ResourceLoader.exists(ScreenRegistry.get_scene_path(mid)))
 		_assert_true("registry_is_module_%s" % str(mid), ScreenRegistry.is_module(mid))
+	_assert_eq("registry_character_dedicated", ScreenRegistry.get_scene_path(&"character"), PATH_CHARACTER)
+	_assert_eq("registry_adventure_placeholder", ScreenRegistry.get_scene_path(&"adventure"), PATH_MODULE)
+	_assert_eq("registry_party_placeholder", ScreenRegistry.get_scene_path(&"party"), PATH_MODULE)
+	_assert_eq("registry_inventory_placeholder", ScreenRegistry.get_scene_path(&"inventory"), PATH_MODULE)
+	_assert_eq("registry_farm_placeholder", ScreenRegistry.get_scene_path(&"farm"), PATH_MODULE)
+	_assert_eq("registry_settings_placeholder", ScreenRegistry.get_scene_path(&"settings"), PATH_MODULE)
 
 	_assert_eq("registry_boot_kind", str(ScreenRegistry.get_kind(&"boot")), "system")
 	_assert_eq("registry_login_kind", str(ScreenRegistry.get_kind(&"login")), "auth")
@@ -128,8 +133,12 @@ func _run_navigation_tests() -> void:
 func _run_module_screen_tests() -> void:
 	var packed: PackedScene = load("res://scenes/screens/module/module_screen.tscn") as PackedScene
 
-	# Content contract for all six modules
-	for mid in ScreenRegistry.get_module_ids():
+	# Shared ModuleScreen content contract for the five placeholder modules only.
+	# Character uses a dedicated screen (tested in character_catalog_smoke_test).
+	var placeholder_modules: Array[StringName] = [
+		&"adventure", &"party", &"inventory", &"farm", &"settings"
+	]
+	for mid in placeholder_modules:
 		var module: Control = packed.instantiate() as Control
 		_tree.root.add_child(module)
 		_assert_true("module_cfg_after_%s" % str(mid), module.call("configure_screen", mid) == true)
@@ -152,6 +161,13 @@ func _run_module_screen_tests() -> void:
 		_assert_eq("module_back_text_%s" % str(mid), back.text, "返回")
 		_assert_true("module_back_height_%s" % str(mid), back.custom_minimum_size.y >= 48.0)
 		module.queue_free()
+
+	# ModuleScreen still accepts character id for shared-frame compatibility, but shell uses dedicated path.
+	var char_mod: Control = packed.instantiate() as Control
+	_tree.root.add_child(char_mod)
+	_assert_true("module_cfg_character_compat", char_mod.call("configure_screen", &"character") == true)
+	_assert_eq("module_id_character_compat", str(char_mod.call("get_screen_id")), "character")
+	char_mod.queue_free()
 
 	# module_activated after tree
 	var after: Control = packed.instantiate() as Control
@@ -309,6 +325,16 @@ func _run_shell_module_flow_tests() -> void:
 		_assert_eq("shell_host_1_%s" % str(mid), int(_shell.call("get_screen_host_child_count")), 1)
 		var mod: Control = _shell.call("get_active_screen") as Control
 		_assert_eq("shell_cfg_id_%s" % str(mid), str(mod.call("get_screen_id")), str(mid))
+		if mid == &"character":
+			_assert_true(
+				"shell_character_dedicated_scene",
+				str(mod.get_script().resource_path).ends_with("character_screen.gd")
+			)
+		else:
+			_assert_true(
+				"shell_placeholder_module_scene_%s" % str(mid),
+				str(mod.get_script().resource_path).ends_with("module_screen.gd")
+			)
 		var back: Button = mod.call("get_back_button") as Button
 		back.emit_signal("pressed")
 		_assert_eq("shell_back_lobby_%s" % str(mid), str(_shell.call("get_active_screen_id")), "lobby")
