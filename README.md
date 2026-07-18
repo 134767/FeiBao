@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 0.4.0** — character catalog foundation.
+**Current version: 0.5.0** — local player profile save foundation.
 
 ## Requirements
 
@@ -22,20 +22,21 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-## What 0.4.0 Adds
+## What 0.5.0 Adds
 
-- Read-only character definition contract + JSON catalog loader
-- Six **development seed** characters (not final lore)
-- Dedicated **角色圖鑑** screen: cards, search, selection, detail
-- Other five Lobby modules remain shared placeholders
+- Versioned local `PlayerProfile` (schema 1) under `user://feibao/`
+- Strict JSON codec + staged recoverable write with backup
+- `PlayerData` autoload; Boot loads profile before Login
+- Login pre-fills saved name but never auto-logs in
+- Default owned character id: `feibao_dev` (definitions stay separate)
 
 ## Docs
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
-- `docs/MODULE_NAVIGATION.md`
+- `docs/FEIBAO_0.5.0_LOCAL_PLAYER_SAVE.md`
 - `docs/FEIBAO_0.4.0_CHARACTER_CATALOG.md`
 
 ## Explicit Exclusions
 
-No combat stats, gacha, ownership, disk saves, remote backends, marketplace assets, or APK-derived content.
+No cloud accounts, encryption claims, auto-login, combat stats, marketplace assets, or APK-derived content.

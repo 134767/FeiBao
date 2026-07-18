@@ -4,9 +4,9 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.4.0**
+- **App version:** **0.5.0**
 - **Language:** GDScript
-- **CLI:** `C:\Godot\godot.exe` (`godot` on PATH)
+- **CLI:** `C:\Godot\godot.exe`
 
 ## Open the Project
 
@@ -21,7 +21,7 @@ godot --path .
 godot --headless --editor --path . --quit
 ```
 
-Expect exit code `0`. After 0.3.0 canonical `project.godot` ordering, editor launches should not dirty the worktree.
+Expect exit code `0`.
 
 ## Run Tests
 
@@ -29,10 +29,9 @@ Expect exit code `0`. After 0.3.0 canonical `project.godot` ordering, editor lau
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-- Prints `[PASS]` / `[FAIL]` per assertion
 - Ends with `TEST SUMMARY: X passed, Y failed`
 - Exit code `0` only when failed == 0
-- 0.4.0 adds `tests/character_catalog_smoke_test.gd` (total passed **> 697**)
+- Suites isolate saves under `user://feibao_tests/` and must not touch production `user://feibao/`
 
 ## Runtime Boot Check
 
@@ -40,27 +39,24 @@ godot --headless --path . --script res://tests/test_runner.gd
 godot --headless --path . --quit-after 5
 ```
 
-Expect exit code `0`. Flow: Bootstrap → GameShell → Boot → Login.
+Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initialize) → Login.
 
-## Character Catalog Data
+## Local Player Save (0.5.0)
 
-- Default path: `res://data/character_catalog.json`
-- Loader: `CharacterCatalog.parse_json_text` / `load_default` (pure, no UI)
-- Seeds are **development samples only** — not final worldbuilding
-- Empty `portrait_path` → native text glyph placeholder (no external images)
+- Production: `user://feibao/player_profile.json`
+- Codec: exact-integer schema/revision; no silent fractional truncation
+- Staged write + backup recovery (not absolute atomic guarantee)
+- Only validated primary updates backup; recovery-after-corrupt must preserve legal backup
+- Fail closed when primary/backup are both invalid
+- Corrupt files are not deleted on initialize
+- Login persistence transaction rolls back full **byte-exact** artifact snapshots on navigation failure
+- save_text write failures restore full pre-write raw-byte artifact snapshots
+- Snapshot authority is PackedByteArray (`get_buffer` / `store_buffer`), not String decode/re-encode
+- Tests: `user://feibao_tests/<case>/` with canonical containment; fingerprint production artifacts instead of requiring them to be absent
 
 ## Git Branch & PR Rules
 
 - Do **not** commit feature work directly to `main`.
-- Branch from latest `main`:
-
-```powershell
-git fetch origin --prune
-git checkout main
-git pull --ff-only origin main
-git checkout -b feature/<task-name>
-```
-
 - Open **Draft** PRs against `main`.
 - No force push to shared branches.
 - No merge until Cloud Director review authorizes it.
@@ -70,13 +66,13 @@ git checkout -b feature/<task-name>
 - `.godot/`
 - Export / build outputs
 - Secrets, tokens, signing keys
-- APK, AAB, PCK, proprietary assets
-- Marketplace downloads (art, fonts, audio, plugins)
+- Production or test save JSON under the repository
+- Marketplace downloads
 - Test temp logs (keep under Windows TEMP)
 
 ## Safety Reminders
 
-- Offline-first and clean-room: original work only.
-- Player name remains memory-only — do not add disk saves without a dedicated task.
-- Character catalog is read-only seeds — no ownership or progression yet.
-- Do not unpack or import commercial game APK content.
+- Offline-first and clean-room.
+- AppState has no disk I/O; PlayerData owns persistence.
+- Character definitions are not ownership records.
+- Do not unpack commercial game APK content.

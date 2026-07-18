@@ -22,7 +22,7 @@ func run_all() -> void:
 	_assert_true("autoload_scripts_parsable", _autoload_scripts_parsable())
 	_assert_true("game_config_json_loadable", _game_config_json_loadable())
 	_assert_eq("app_name_equals_FeiBao", str(_game_config().call("get_app_name")), "FeiBao")
-	_assert_eq("app_version_equals_0_4_0", str(_game_config().call("get_app_version")), "0.4.0")
+	_assert_eq("app_version_equals_0_5_0", str(_game_config().call("get_app_version")), "0.5.0")
 	_assert_eq("design_width_equals_720", int(_game_config().call("get_design_width")), 720)
 	_assert_eq("design_height_equals_1280", int(_game_config().call("get_design_height")), 1280)
 	_assert_eq("orientation_equals_portrait", str(_game_config().call("get_orientation")), "portrait")
