@@ -57,8 +57,9 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 ## Battle Board & Turn Loop (1.0.0)
 
 - BattleState = session shell; BattleRuntime = board / RNG / turns / events (memory-only).
+- Runtime **full session binding**: area + stage + party order + leader.
 - Pure domain: `BattleBoardModel`, `BattleBoardEngine`, resolution event dictionaries.
-- Deterministic seed from session fields; no global RNG / time seed.
+- Deterministic seed from session fields; no global RNG / time seed; hard-cap cascade rollback.
 - Enter creates state + runtime; leave clears both with dual-snapshot rollback.
 - No enemies, damage, win/loss, rewards, or board persistence.
 

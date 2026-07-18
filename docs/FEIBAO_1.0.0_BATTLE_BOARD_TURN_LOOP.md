@@ -11,7 +11,7 @@ This is still a **development sample** of board + turn flow — **not** finished
 | Component | Role |
 |-----------|------|
 | **BattleState** | Entry session snapshot (area/stage/party/leader). Memory-only. No board. |
-| **BattleRuntime** | Board, RNG state, turns, selection, phase, resolution events. Memory-only. |
+| **BattleRuntime** | Board, RNG, turns, selection, phase, events + **full session binding** (area/stage/party/leader). Memory-only. |
 | **BattleBoardModel / Engine** | Pure domain: generate, match, gravity, refill, swap resolve. No SceneTree. |
 | **BattleScreen** | Renders session + board; selection/swap UX; leave transaction. |
 
@@ -22,12 +22,31 @@ This is still a **development sample** of board + turn flow — **not** finished
 - Orb kinds (dev sample, no combat effects): `ember` 炎 / `tide` 潮 / `leaf` 葉 / `light` 光 / `shadow` 影
 - Getters return **defensive copies**
 
+## Full session binding
+
+BattleRuntime stores and compares:
+
+- `session_area_id`
+- `session_stage_id`
+- `session_party_character_ids` (order-sensitive defensive copy)
+- `session_leader_character_id`
+
+Same-session idempotent begin requires **all four** equal. Same area/stage with different party or leader → fail closed (no overwrite).
+
+## Snapshot / restore
+
+- Active snapshot requires live BattleState with exact full binding match; board 30 valid orbs; RNG ≠ 0.
+- Phase/selection: READY → no selection; SELECTED → in-bounds; ERROR → (−1,−1) or in-bounds; **RESOLVING restore rejected**.
+- Inactive snapshot is **canonical**: empty session fields, empty board, phase INACTIVE, counters 0, events [], RNG=1.
+- Event equality uses deterministic deep compare (not Dictionary stringification).
+
 ## Deterministic RNG
 
 - Dedicated **xorshift32** state inside `BattleBoardEngine` (not global `randomize()` / time)
 - Seed = stable FNV-1a over fixed field order: `area_id | stage_id | leader | party_ids…`
 - Same session → same initial board + RNG state
 - Refill order: **row-major** (left→right, top→bottom), empty cells only
+- Production domain sources must not call `randi`/`randomize`/`Time.get_*` for seeding
 
 ## Initial board guarantees
 

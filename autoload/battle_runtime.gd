@@ -1,4 +1,5 @@
 ## In-memory battle board runtime (1.0.0). No disk, navigation, or profile mutation.
+## Full session binding: area + stage + party (order) + leader.
 extends Node
 
 signal runtime_changed(active: bool)
@@ -19,9 +20,14 @@ const VALID_PHASES: Array[StringName] = [
 	PHASE_ERROR,
 ]
 
+## Canonical inactive RNG seed (never 0).
+const CANONICAL_INACTIVE_RNG: int = 1
+
 var _active: bool = false
 var _session_area_id: StringName = &""
 var _session_stage_id: StringName = &""
+var _session_party_character_ids: Array[StringName] = []
+var _session_leader_character_id: StringName = &""
 var _board: BattleBoardModel = BattleBoardModel.new()
 var _engine: BattleBoardEngine = BattleBoardEngine.new()
 var _turn_count: int = 0
@@ -67,6 +73,14 @@ func get_session_stage_id() -> StringName:
 	return _session_stage_id
 
 
+func get_session_party_character_ids() -> Array[StringName]:
+	return _session_party_character_ids.duplicate()
+
+
+func get_session_leader_character_id() -> StringName:
+	return _session_leader_character_id
+
+
 func get_board_width() -> int:
 	return BattleBoardModel.WIDTH
 
@@ -103,7 +117,7 @@ func get_rng_state() -> int:
 	return _engine.get_rng_state()
 
 
-## Begin runtime from active BattleState session. Deterministic seed from session fields.
+## Begin runtime from active BattleState session. Deterministic seed from full session fields.
 func begin_from_battle_session() -> Dictionary:
 	if not is_instance_valid(BattleState) or not BattleState.has_active_session():
 		return _result(false, false, "no active BattleState session")
@@ -119,15 +133,17 @@ func begin_from_battle_session() -> Dictionary:
 	if party[0] != leader:
 		return _result(false, false, "leader must be party index 0")
 
-	# Same session already active → idempotent.
+	# Same full session already active → idempotent.
 	if (
 		has_active_runtime()
 		and _session_area_id == area_id
 		and _session_stage_id == stage_id
+		and _party_ids_equal(_session_party_character_ids, party)
+		and _session_leader_character_id == leader
 	):
 		return _result(true, false, "")
 
-	# Different active runtime must not be overwritten.
+	# Different active runtime (including same area/stage but different party/leader) → fail closed.
 	if has_active_runtime():
 		return _result(false, false, "active runtime already exists")
 
@@ -139,6 +155,8 @@ func begin_from_battle_session() -> Dictionary:
 	_active = true
 	_session_area_id = area_id
 	_session_stage_id = stage_id
+	_session_party_character_ids = party.duplicate()
+	_session_leader_character_id = leader
 	_board.set_cells(gen.get("cells", []) as Array)
 	_engine.set_rng_state(int(gen.get("rng_state", 1)))
 	_turn_count = 0
@@ -165,6 +183,8 @@ func begin_from_seed_for_tests(seed: int) -> Dictionary:
 	_active = true
 	_session_area_id = BattleState.get_area_id()
 	_session_stage_id = BattleState.get_stage_id()
+	_session_party_character_ids = BattleState.get_party_character_ids()
+	_session_leader_character_id = BattleState.get_leader_character_id()
 	_board.set_cells(gen.get("cells", []) as Array)
 	_engine.set_rng_state(int(gen.get("rng_state", 1)))
 	_turn_count = 0
@@ -195,6 +215,8 @@ func capture_runtime_snapshot() -> Dictionary:
 		"active": _active,
 		"session_area_id": _session_area_id,
 		"session_stage_id": _session_stage_id,
+		"session_party_character_ids": _session_party_character_ids.duplicate(),
+		"session_leader_character_id": _session_leader_character_id,
 		"width": BattleBoardModel.WIDTH,
 		"height": BattleBoardModel.HEIGHT,
 		"board_cells": _board.get_cells(),
@@ -217,6 +239,8 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	var next_active: bool = bool(snapshot.get("active", false))
 	var next_area: StringName = snapshot.get("session_area_id", &"") as StringName
 	var next_stage: StringName = snapshot.get("session_stage_id", &"") as StringName
+	var next_party: Array[StringName] = _coerce_party(snapshot.get("session_party_character_ids", []))
+	var next_leader: StringName = snapshot.get("session_leader_character_id", &"") as StringName
 	var next_w: int = int(snapshot.get("width", 0))
 	var next_h: int = int(snapshot.get("height", 0))
 	var next_cells_raw: Variant = snapshot.get("board_cells", [])
@@ -233,46 +257,79 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		next_events = BattleResolutionEvent.duplicate_events(raw_events as Array)
 	var next_msg: String = str(snapshot.get("last_message", ""))
 
+	# RESOLVING is not restorable (no mid-resolution resume state in 1.0.0).
+	if next_phase == PHASE_RESOLVING:
+		return _result(false, false, "resolving snapshot not restorable")
+
 	if next_w != BattleBoardModel.WIDTH or next_h != BattleBoardModel.HEIGHT:
 		return _result(false, false, "invalid board dimensions")
 	if not (next_cells_raw is Array) or (next_cells_raw as Array).size() != BattleBoardModel.CELL_COUNT:
 		return _result(false, false, "invalid board length")
+
 	var next_cells: Array[StringName] = []
 	for item in next_cells_raw as Array:
-		var k: StringName = item as StringName
-		if next_active and not BattleOrbKind.is_empty(k) and not BattleOrbKind.is_valid(k):
-			return _result(false, false, "invalid orb kind")
-		if not next_active and not BattleOrbKind.is_empty(k) and not BattleOrbKind.is_valid(k):
-			return _result(false, false, "invalid orb kind")
-		next_cells.append(k)
-	if next_active:
-		for k in next_cells:
-			if not BattleOrbKind.is_valid(k):
-				return _result(false, false, "active board requires filled valid cells")
+		next_cells.append(item as StringName)
+
 	if not VALID_PHASES.has(next_phase):
 		return _result(false, false, "invalid phase")
-	if next_turn < 0:
-		return _result(false, false, "invalid turn_count")
-	if next_match < 0 or next_cascade < 0:
+	if next_turn < 0 or next_match < 0 or next_cascade < 0:
 		return _result(false, false, "invalid counters")
-	if next_sx != -1 or next_sy != -1:
-		if not BattleBoardModel.in_bounds(next_sx, next_sy):
-			return _result(false, false, "selected cell out of bounds")
-	if next_active:
-		if String(next_area).is_empty() or String(next_stage).is_empty():
-			return _result(false, false, "active snapshot missing session ids")
-		# Binding check: when BattleState active, session must match.
-		if is_instance_valid(BattleState) and BattleState.has_active_session():
-			if BattleState.get_area_id() != next_area or BattleState.get_stage_id() != next_stage:
-				return _result(false, false, "mismatched BattleState session")
-	if next_phase == PHASE_INACTIVE and next_active:
-		return _result(false, false, "phase inactive with active flag")
+	if next_rng == 0:
+		return _result(false, false, "invalid rng_state")
 
-	# Idempotent identical restore.
+	# Phase / selection consistency.
+	if next_phase == PHASE_READY:
+		if next_sx != -1 or next_sy != -1:
+			return _result(false, false, "ready requires no selection")
+	elif next_phase == PHASE_SELECTED:
+		if not BattleBoardModel.in_bounds(next_sx, next_sy):
+			return _result(false, false, "selected phase requires in-bounds selection")
+	elif next_phase == PHASE_ERROR:
+		# Documented: ERROR may keep (-1,-1) or a valid cell selection from prior state.
+		if next_sx != -1 or next_sy != -1:
+			if not BattleBoardModel.in_bounds(next_sx, next_sy):
+				return _result(false, false, "error selection out of bounds")
+	elif next_phase == PHASE_INACTIVE:
+		if next_active:
+			return _result(false, false, "phase inactive with active flag")
+	else:
+		if next_sx != -1 or next_sy != -1:
+			if not BattleBoardModel.in_bounds(next_sx, next_sy):
+				return _result(false, false, "selected cell out of bounds")
+
+	if next_active:
+		var active_err: String = _validate_active_snapshot(
+			next_area, next_stage, next_party, next_leader, next_cells, next_phase
+		)
+		if not active_err.is_empty():
+			return _result(false, false, active_err)
+	else:
+		var inactive_err: String = _validate_inactive_canonical(
+			next_phase,
+			next_area,
+			next_stage,
+			next_party,
+			next_leader,
+			next_cells,
+			next_sx,
+			next_sy,
+			next_turn,
+			next_match,
+			next_cascade,
+			next_events,
+			next_msg,
+			next_rng
+		)
+		if not inactive_err.is_empty():
+			return _result(false, false, inactive_err)
+
+	# Idempotent identical restore (no signals).
 	if (
 		_active == next_active
 		and _session_area_id == next_area
 		and _session_stage_id == next_stage
+		and _party_ids_equal(_session_party_character_ids, next_party)
+		and _session_leader_character_id == next_leader
 		and _engine.get_rng_state() == next_rng
 		and _turn_count == next_turn
 		and _phase == next_phase
@@ -282,13 +339,15 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		and _last_cascade_count == next_cascade
 		and _last_message == next_msg
 		and _board.equals_cells(next_cells)
-		and _events_equal(_last_events, next_events)
+		and BattleResolutionEvent.events_equal(_last_events, next_events)
 	):
 		return _result(true, false, "")
 
 	_active = next_active
 	_session_area_id = next_area
 	_session_stage_id = next_stage
+	_session_party_character_ids = next_party.duplicate()
+	_session_leader_character_id = next_leader
 	_board.set_cells(next_cells)
 	_engine.set_rng_state(next_rng)
 	_turn_count = next_turn
@@ -301,6 +360,78 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	runtime_changed.emit(_active)
 	board_changed.emit()
 	return _result(true, true, "")
+
+
+func _validate_active_snapshot(
+	area: StringName,
+	stage: StringName,
+	party: Array[StringName],
+	leader: StringName,
+	cells: Array[StringName],
+	phase: StringName
+) -> String:
+	if not is_instance_valid(BattleState):
+		return "active snapshot requires BattleState"
+	if not BattleState.has_active_session():
+		return "active snapshot requires active BattleState session"
+	if String(area).is_empty() or String(stage).is_empty():
+		return "active snapshot missing session ids"
+	if party.size() < 1 or party.size() > 3:
+		return "active snapshot invalid party size"
+	if String(leader).is_empty() or party[0] != leader:
+		return "active snapshot leader must be party index 0"
+	if BattleState.get_area_id() != area:
+		return "mismatched BattleState area"
+	if BattleState.get_stage_id() != stage:
+		return "mismatched BattleState stage"
+	if not _party_ids_equal(BattleState.get_party_character_ids(), party):
+		return "mismatched BattleState party"
+	if BattleState.get_leader_character_id() != leader:
+		return "mismatched BattleState leader"
+	for k in cells:
+		if not BattleOrbKind.is_valid(k):
+			return "active board requires filled valid cells"
+	if phase == PHASE_INACTIVE:
+		return "active snapshot cannot be inactive phase"
+	return ""
+
+
+func _validate_inactive_canonical(
+	phase: StringName,
+	area: StringName,
+	stage: StringName,
+	party: Array[StringName],
+	leader: StringName,
+	cells: Array[StringName],
+	sx: int,
+	sy: int,
+	turn: int,
+	match_n: int,
+	cascade_n: int,
+	events: Array,
+	msg: String,
+	rng: int
+) -> String:
+	if phase != PHASE_INACTIVE:
+		return "inactive snapshot requires inactive phase"
+	if not String(area).is_empty() or not String(stage).is_empty():
+		return "inactive snapshot requires empty session ids"
+	if not String(leader).is_empty() or not party.is_empty():
+		return "inactive snapshot requires empty party/leader"
+	if sx != -1 or sy != -1:
+		return "inactive snapshot requires no selection"
+	if turn != 0 or match_n != 0 or cascade_n != 0:
+		return "inactive snapshot requires zero counters"
+	if not events.is_empty():
+		return "inactive snapshot requires empty events"
+	if not msg.is_empty():
+		return "inactive snapshot requires empty message"
+	if rng != CANONICAL_INACTIVE_RNG:
+		return "inactive snapshot requires canonical rng"
+	for k in cells:
+		if not BattleOrbKind.is_empty(k):
+			return "inactive snapshot requires empty board"
+	return ""
 
 
 ## Select / deselect / retarget / attempt swap via cell press.
@@ -339,11 +470,11 @@ func try_swap_selected_with(x: int, y: int) -> Dictionary:
 
 func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 	if not has_active_runtime():
-		return {"ok": false, "error": "inactive", "accepted": false}
+		return {"ok": false, "accepted": false, "error": "inactive"}
 	if _phase == PHASE_RESOLVING or _phase == PHASE_INACTIVE:
-		return {"ok": false, "error": "invalid phase", "accepted": false}
+		return {"ok": false, "accepted": false, "error": "invalid phase"}
 	if _phase == PHASE_ERROR:
-		return {"ok": false, "error": "error phase", "accepted": false}
+		return {"ok": false, "accepted": false, "error": "error phase"}
 
 	var prior: Dictionary = capture_runtime_snapshot()
 	_set_phase(PHASE_RESOLVING)
@@ -357,22 +488,21 @@ func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 	)
 
 	if not bool(result.get("ok", false)):
-		# Hard fail (bounds/cascade): restore exact prior.
+		# Hard fail (bounds/cascade): restore exact prior domain, then ERROR only for cascade.
 		restore_runtime_snapshot(prior)
-		_last_message = str(result.get("error", "swap failed"))
-		if str(result.get("error", "")).find("cascade") >= 0:
+		var err: String = str(result.get("error", "swap failed"))
+		if err.find("cascade") >= 0:
 			_set_phase(PHASE_ERROR)
 			_last_message = "連鎖超過上限，已還原"
 		else:
-			_set_phase(PHASE_READY if not has_selection() else PHASE_SELECTED)
+			_last_message = err
 		return {
 			"ok": false,
 			"accepted": false,
-			"error": str(result.get("error", "")),
+			"error": err,
 		}
 
 	if not bool(result.get("accepted", false)):
-		# No match: board/rng/turn unchanged; clear selection.
 		_selected = Vector2i(-1, -1)
 		_last_events = result.get("events", []) as Array
 		_last_match_count = 0
@@ -387,7 +517,6 @@ func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 			"reason": "no match",
 		}
 
-	# Accepted move.
 	_board.set_cells(result.get("cells", []) as Array)
 	_engine.set_rng_state(int(result.get("rng_state", _engine.get_rng_state())))
 	_turn_count = int(result.get("turn_count", _turn_count))
@@ -468,6 +597,10 @@ func generate_board_for_tests(seed: int) -> Dictionary:
 	return _engine.generate_initial_board(seed)
 
 
+func events_equal_for_tests(a: Array, b: Array) -> bool:
+	return BattleResolutionEvent.events_equal(a, b)
+
+
 func _set_phase(phase: StringName) -> void:
 	if _phase == phase:
 		return
@@ -479,8 +612,10 @@ func _clear_fields(emit_phase: bool) -> void:
 	_active = false
 	_session_area_id = &""
 	_session_stage_id = &""
+	_session_party_character_ids.clear()
+	_session_leader_character_id = &""
 	_board.clear_all()
-	_engine.set_rng_state(1)
+	_engine.set_rng_state(CANONICAL_INACTIVE_RNG)
 	_turn_count = 0
 	_last_match_count = 0
 	_last_cascade_count = 0
@@ -503,10 +638,18 @@ func _result(ok: bool, changed: bool, error: String) -> Dictionary:
 	}
 
 
-func _events_equal(a: Array, b: Array) -> bool:
+func _party_ids_equal(a: Array[StringName], b: Array[StringName]) -> bool:
 	if a.size() != b.size():
 		return false
 	for i in a.size():
-		if str(a[i]) != str(b[i]):
+		if a[i] != b[i]:
 			return false
 	return true
+
+
+func _coerce_party(raw: Variant) -> Array[StringName]:
+	var out: Array[StringName] = []
+	if raw is Array:
+		for item in raw as Array:
+			out.append(item as StringName)
+	return out
