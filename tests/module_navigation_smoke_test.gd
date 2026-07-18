@@ -56,17 +56,22 @@ func _run_registry_tests() -> void:
 	}
 	const PATH_MODULE: String = "res://scenes/screens/module/module_screen.tscn"
 	const PATH_CHARACTER: String = "res://scenes/screens/character/character_screen.tscn"
+	const PATH_PARTY: String = "res://scenes/screens/party/party_screen.tscn"
 	for mid in modules:
 		_assert_eq("registry_title_%s" % str(mid), ScreenRegistry.get_display_title(mid), titles[mid])
 		_assert_eq("registry_kind_%s" % str(mid), str(ScreenRegistry.get_kind(mid)), "module")
 		_assert_eq("registry_fallback_%s" % str(mid), str(ScreenRegistry.get_back_fallback(mid)), "lobby")
-		var expected_path: String = PATH_CHARACTER if mid == &"character" else PATH_MODULE
+		var expected_path: String = PATH_MODULE
+		if mid == &"character":
+			expected_path = PATH_CHARACTER
+		elif mid == &"party":
+			expected_path = PATH_PARTY
 		_assert_eq("registry_path_%s" % str(mid), ScreenRegistry.get_scene_path(mid), expected_path)
 		_assert_true("registry_path_exists_%s" % str(mid), ResourceLoader.exists(ScreenRegistry.get_scene_path(mid)))
 		_assert_true("registry_is_module_%s" % str(mid), ScreenRegistry.is_module(mid))
 	_assert_eq("registry_character_dedicated", ScreenRegistry.get_scene_path(&"character"), PATH_CHARACTER)
+	_assert_eq("registry_party_dedicated", ScreenRegistry.get_scene_path(&"party"), PATH_PARTY)
 	_assert_eq("registry_adventure_placeholder", ScreenRegistry.get_scene_path(&"adventure"), PATH_MODULE)
-	_assert_eq("registry_party_placeholder", ScreenRegistry.get_scene_path(&"party"), PATH_MODULE)
 	_assert_eq("registry_inventory_placeholder", ScreenRegistry.get_scene_path(&"inventory"), PATH_MODULE)
 	_assert_eq("registry_farm_placeholder", ScreenRegistry.get_scene_path(&"farm"), PATH_MODULE)
 	_assert_eq("registry_settings_placeholder", ScreenRegistry.get_scene_path(&"settings"), PATH_MODULE)
@@ -133,10 +138,10 @@ func _run_navigation_tests() -> void:
 func _run_module_screen_tests() -> void:
 	var packed: PackedScene = load("res://scenes/screens/module/module_screen.tscn") as PackedScene
 
-	# Shared ModuleScreen content contract for the five placeholder modules only.
-	# Character uses a dedicated screen (tested in character_catalog_smoke_test).
+	# Shared ModuleScreen content contract for remaining placeholder modules only.
+	# Character and Party use dedicated screens.
 	var placeholder_modules: Array[StringName] = [
-		&"adventure", &"party", &"inventory", &"farm", &"settings"
+		&"adventure", &"inventory", &"farm", &"settings"
 	]
 	for mid in placeholder_modules:
 		var module: Control = packed.instantiate() as Control
@@ -329,6 +334,11 @@ func _run_shell_module_flow_tests() -> void:
 			_assert_true(
 				"shell_character_dedicated_scene",
 				str(mod.get_script().resource_path).ends_with("character_screen.gd")
+			)
+		elif mid == &"party":
+			_assert_true(
+				"shell_party_dedicated_scene",
+				str(mod.get_script().resource_path).ends_with("party_screen.gd")
 			)
 		else:
 			_assert_true(

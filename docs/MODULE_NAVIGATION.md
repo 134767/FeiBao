@@ -1,4 +1,4 @@
-# FeiBao Module Navigation (0.4.0)
+# FeiBao Module Navigation (0.7.0)
 
 ## Registry Metadata Schema
 
@@ -15,7 +15,7 @@ Each screen entry in `ScreenRegistry` contains:
 
 1. `adventure` — 冒險 → shared `ModuleScreen`
 2. `character` — 角色 → **dedicated** `character_screen.tscn`
-3. `party` — 隊伍 → shared `ModuleScreen`
+3. `party` — 隊伍 → **dedicated** `party_screen.tscn`
 4. `inventory` — 背包 → shared `ModuleScreen`
 5. `farm` — 農場 → shared `ModuleScreen`
 6. `settings` — 設定 → shared `ModuleScreen`
@@ -24,21 +24,27 @@ Constants:
 
 - `PATH_MODULE` = `res://scenes/screens/module/module_screen.tscn`
 - `PATH_CHARACTER_SCREEN` = `res://scenes/screens/character/character_screen.tscn`
+- `PATH_PARTY_SCREEN` = `res://scenes/screens/party/party_screen.tscn`
 
 ## Shared ModuleScreen
 
-Still used by five placeholder modules:
+Used by remaining placeholder modules (adventure / inventory / farm / settings):
 
 - One frame for title / status / back
 - Body text: `此功能將於後續版本開放`
-- Future modules may switch `path` to a dedicated scene (as character did)
 
 ## Character Module
 
-- Title in registry: **角色**
-- Screen header: **角色圖鑑**
-- Catalog JSON + cards + search + detail
-- Development seed badge; no combat / ownership / persistence
+- Dedicated catalog screen with ownership filters and representative selection (0.6.0+)
+
+## Party Module (0.7.0)
+
+- Dedicated `PartyScreen` for a single active party (1–3 members)
+- **BodyScroll**: page-level vertical scroll (horizontal disabled) so 360×640 / 390×844 can reach all slots, roster, and action buttons
+- Roster columns: **exactly 2 / 2 / 4** on 360 / 390 / 720 viewports
+- Focus vs leader vs representative remain separate concepts
+- Remove focus fallback: same-index remaining member, else previous remaining member; leader remove → new index 0; visible slot/roster focus matches internal focus
+- Full UI refresh only on successful changed `profile_changed` (count=1); failure/no-change = 0
 
 ## GameShell Configure Hook
 
@@ -48,7 +54,7 @@ Boot / Login / Lobby do not implement it and remain unchanged.
 ## Flow
 
 ```text
-Lobby --navigate_to(module, history)--> ModuleScreen or CharacterScreen
+Lobby --navigate_to(module, history)--> ModuleScreen / CharacterScreen / PartyScreen
 Screen --go_back_or_fallback()--> Lobby
 ```
 
@@ -59,7 +65,7 @@ Screen --go_back_or_fallback()--> Lobby
 
 ## Not Implemented
 
-No adventure stages, combat, character progression, party build, inventory items, farm systems, or functional settings.
+No adventure stages, combat, multi-party, inventory items, farm systems, or functional settings.
 
 ## Testing
 

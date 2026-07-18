@@ -365,12 +365,17 @@ func _run_registry_tests() -> void:
 	_assert_eq("reg_module_order_3", str(modules[3]), "inventory")
 	_assert_eq("reg_module_order_4", str(modules[4]), "farm")
 	_assert_eq("reg_module_order_5", str(modules[5]), "settings")
-	for mid in [&"adventure", &"party", &"inventory", &"farm", &"settings"]:
+	for mid in [&"adventure", &"inventory", &"farm", &"settings"]:
 		_assert_eq(
 			"reg_placeholder_path_%s" % str(mid),
 			ScreenRegistry.get_scene_path(mid),
 			"res://scenes/screens/module/module_screen.tscn"
 		)
+	_assert_eq(
+		"reg_party_dedicated_path",
+		ScreenRegistry.get_scene_path(&"party"),
+		"res://scenes/screens/party/party_screen.tscn"
+	)
 	_assert_true("reg_validate_metadata", ScreenRegistry.validate_metadata())
 	_assert_true("reg_validate_resources", ScreenRegistry.validate_resources())
 	_assert_true(
@@ -380,6 +385,10 @@ func _run_registry_tests() -> void:
 	_assert_true(
 		"reg_card_resource_exists",
 		ResourceLoader.exists("res://scenes/screens/character/character_card.tscn")
+	)
+	_assert_true(
+		"reg_party_resource_exists",
+		ResourceLoader.exists("res://scenes/screens/party/party_screen.tscn")
 	)
 
 
