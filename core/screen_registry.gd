@@ -6,6 +6,7 @@ const SCREEN_BOOT: StringName = &"boot"
 const SCREEN_LOGIN: StringName = &"login"
 const SCREEN_LOBBY: StringName = &"lobby"
 const SCREEN_ADVENTURE: StringName = &"adventure"
+const SCREEN_BATTLE: StringName = &"battle"
 const SCREEN_CHARACTER: StringName = &"character"
 const SCREEN_PARTY: StringName = &"party"
 const SCREEN_INVENTORY: StringName = &"inventory"
@@ -16,11 +17,13 @@ const KIND_SYSTEM: StringName = &"system"
 const KIND_AUTH: StringName = &"auth"
 const KIND_HOME: StringName = &"home"
 const KIND_MODULE: StringName = &"module"
+const KIND_SESSION: StringName = &"session"
 
 const PATH_MODULE: String = "res://scenes/screens/module/module_screen.tscn"
 const PATH_CHARACTER_SCREEN: String = "res://scenes/screens/character/character_screen.tscn"
 const PATH_PARTY_SCREEN: String = "res://scenes/screens/party/party_screen.tscn"
 const PATH_ADVENTURE_SCREEN: String = "res://scenes/screens/adventure/adventure_screen.tscn"
+const PATH_BATTLE_SCREEN: String = "res://scenes/screens/battle/battle_screen.tscn"
 
 ## Fixed registration order (not Dictionary key order).
 const _ORDERED_IDS: Array[StringName] = [
@@ -28,6 +31,7 @@ const _ORDERED_IDS: Array[StringName] = [
 	SCREEN_LOGIN,
 	SCREEN_LOBBY,
 	SCREEN_ADVENTURE,
+	SCREEN_BATTLE,
 	SCREEN_CHARACTER,
 	SCREEN_PARTY,
 	SCREEN_INVENTORY,
@@ -68,6 +72,12 @@ const _SCREENS: Dictionary = {
 		"title": "冒險",
 		"kind": KIND_MODULE,
 		"back_fallback": SCREEN_LOBBY,
+	},
+	SCREEN_BATTLE: {
+		"path": PATH_BATTLE_SCREEN,
+		"title": "戰鬥",
+		"kind": KIND_SESSION,
+		"back_fallback": SCREEN_ADVENTURE,
 	},
 	SCREEN_CHARACTER: {
 		"path": PATH_CHARACTER_SCREEN,
@@ -164,8 +174,8 @@ static func get_title(screen_id: StringName) -> String:
 
 
 static func validate_metadata() -> bool:
-	if _ORDERED_IDS.size() != 9:
-		push_error("ScreenRegistry: expected 9 registered screens")
+	if _ORDERED_IDS.size() != 10:
+		push_error("ScreenRegistry: expected 10 registered screens")
 		return false
 	if _MODULE_ORDER.size() != 6:
 		push_error("ScreenRegistry: expected 6 modules")
@@ -232,6 +242,19 @@ static func validate_metadata() -> bool:
 		return false
 	if get_kind(SCREEN_LOBBY) != KIND_HOME:
 		push_error("ScreenRegistry: lobby kind must be home")
+		return false
+	# Battle is a transient session screen — not a lobby module.
+	if get_kind(SCREEN_BATTLE) != KIND_SESSION:
+		push_error("ScreenRegistry: battle kind must be session")
+		return false
+	if get_scene_path(SCREEN_BATTLE) != PATH_BATTLE_SCREEN:
+		push_error("ScreenRegistry: battle must use dedicated path")
+		return false
+	if get_back_fallback(SCREEN_BATTLE) != SCREEN_ADVENTURE:
+		push_error("ScreenRegistry: battle fallback must be adventure")
+		return false
+	if is_module(SCREEN_BATTLE):
+		push_error("ScreenRegistry: battle must not be a lobby module")
 		return false
 
 	return true

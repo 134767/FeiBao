@@ -1,12 +1,14 @@
-## Dedicated adventure area/stage selection screen (no real battle in 0.8.0).
+## Dedicated adventure area/stage selection screen; prepare enters battle session shell (0.9.0).
 extends Control
 
 signal back_requested
 signal stage_prepared(stage_id: StringName)
 
 const CARD_SCENE_PATH: String = "res://scenes/screens/adventure/stage_card.tscn"
-const MSG_PREPARE_OK: String = "關卡準備完成，戰鬥系統將於後續版本開放"
+const MSG_PREPARE_OK: String = "關卡準備完成，進入戰鬥畫面"
 const MSG_PREPARE_FAIL: String = "無法準備此關卡"
+const MSG_SESSION_FAIL: String = "無法建立戰鬥工作階段"
+const MSG_NAV_FAIL: String = "無法進入戰鬥畫面"
 const MSG_NO_PARTY: String = "無法讀取隊伍資料"
 const MSG_CATALOG_FAIL: String = "冒險關卡資料載入失敗"
 const SEED_HINT: String = "本頁內容為開發樣本，非正式世界觀。"
@@ -388,16 +390,26 @@ func _on_prepare_pressed() -> void:
 	if not is_instance_valid(AdventureState):
 		_set_mutation_message(MSG_PREPARE_FAIL)
 		return
+	if not is_instance_valid(BattleSession):
+		_set_mutation_message(MSG_SESSION_FAIL)
+		return
 	var result: Dictionary = AdventureState.prepare_stage(_selected_stage_id)
 	if not bool(result.get("ok", false)):
 		_set_mutation_message(MSG_PREPARE_FAIL)
 		return
+	# UI update via prepared_stage_changed single path when changed.
+	var session: Dictionary = BattleSession.begin_from_prepared()
+	if not bool(session.get("ok", false)):
+		_set_mutation_message(MSG_SESSION_FAIL)
+		return
+	if not NavigationState.navigate_to(ScreenRegistry.SCREEN_BATTLE, true):
+		# Fail-closed: drop session shell if navigation rejected.
+		BattleSession.clear_session()
+		_set_mutation_message(MSG_NAV_FAIL)
+		return
+	_set_mutation_message(MSG_PREPARE_OK)
 	if bool(result.get("changed", false)):
-		# UI update via prepared_stage_changed single path.
-		_set_mutation_message(MSG_PREPARE_OK)
 		stage_prepared.emit(_selected_stage_id)
-	else:
-		_set_mutation_message(MSG_PREPARE_OK)
 
 
 func _on_prepared_stage_changed(_area_id: StringName, _stage_id: StringName) -> void:

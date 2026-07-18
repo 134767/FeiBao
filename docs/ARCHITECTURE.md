@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.8.0** — adventure stage selection foundation.
+**Current version: 0.9.0** — battle session shell foundation.
 
 Does **not** claim production multiplayer, combat, or cloud systems.
 
@@ -18,7 +18,8 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 | 0.5.0 | Local versioned player profile, staged save, backup recovery |
 | 0.6.0 | Ownership + representative wired into character catalog UI |
 | 0.7.0 | Active party formation + profile schema 2 + lazy schema 1 migration |
-| **0.8.0 (current)** | Adventure stage selection + StageCatalog + AdventureState preparation |
+| 0.8.0 | Adventure stage selection + StageCatalog + AdventureState preparation |
+| **0.9.0 (current)** | Battle session shell + BattleScreen (no real combat) |
 
 ## Clean-room Principles
 
@@ -45,16 +46,25 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 ```text
 Bootstrap → GameShell → Boot (PlayerData.initialize)
   → Login (prefill name; manual submit) → Lobby
-  ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
-  ⇄ AdventureScreen (area/stage selection + preparation context)
+  ⇄ ModuleScreen (inventory, farm, settings)
+  ⇄ AdventureScreen (area/stage selection + preparation)
+  ⇄ BattleScreen (session shell; not a lobby module)
   ⇄ CharacterScreen (catalog + ownership / representative)
   ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
 
+## Battle Session Shell (0.9.0)
+
+- BattleSession memory-only snapshot from prepared stage + active party.
+- Dedicated BattleScreen; leave clears session and returns to adventure.
+- No real combat, completion write, or schema change.
+
+See `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`.
+
 ## Adventure Stage Selection (0.8.0)
 
 - StageCatalog pure data (no UI / PlayerData).
-- AdventureState memory-only prepare_stage for future battle entry.
+- AdventureState memory-only prepare_stage for battle entry.
 - No combat, drops, or stage completion persistence; profile schema stays 2.
 
 See `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`.

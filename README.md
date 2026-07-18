@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 0.8.0** — adventure stage selection foundation.
+**Current version: 0.9.0** — battle session shell foundation.
 
 ## Requirements
 
@@ -22,17 +22,19 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-## What 0.8.0 Adds
+## What 0.9.0 Adds
 
-- Dedicated AdventureScreen with area story + stage grid
-- Pure StageCatalog (schema 1 development seed: 2 areas × 3 stages)
-- AdventureState in-memory stage preparation (no disk / no combat yet)
-- PlayerProfile schema remains **2**
+- Memory-only BattleSession snapshot (stage + party, no disk)
+- Dedicated BattleScreen shell (not a lobby module)
+- Adventure prepare → session → battle navigation + safe leave
+- PlayerProfile schema remains **2**; StageCatalog schema remains **1**
+- No real combat / completion persistence
 
 ## Docs
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
+- `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`
 - `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`
 - `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`
 - `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`
