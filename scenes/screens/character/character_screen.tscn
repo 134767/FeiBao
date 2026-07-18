@@ -25,7 +25,7 @@ theme_override_constants/margin_bottom = 16
 
 [node name="VBox" type="VBoxContainer" parent="Margin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="HeaderRow" type="HBoxContainer" parent="Margin/VBox"]
 layout_mode = 2
@@ -52,6 +52,38 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 placeholder_text = "搜尋角色、物種或標籤"
 clear_button_enabled = true
+
+[node name="OwnershipSummaryLabel" type="Label" parent="Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "已持有 0 / 0"
+autowrap_mode = 3
+
+[node name="FilterRow" type="HBoxContainer" parent="Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FilterAllButton" type="Button" parent="Margin/VBox/FilterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "全部"
+
+[node name="FilterOwnedButton" type="Button" parent="Margin/VBox/FilterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "已持有"
+
+[node name="FilterUnownedButton" type="Button" parent="Margin/VBox/FilterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "未持有"
 
 [node name="StatusLabel" type="Label" parent="Margin/VBox"]
 unique_name_in_owner = true
@@ -84,7 +116,7 @@ theme_override_constants/separation = 10
 
 [node name="CardScroll" type="ScrollContainer" parent="Margin/VBox/ContentRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 180)
+custom_minimum_size = Vector2(0, 160)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -101,7 +133,7 @@ columns = 2
 
 [node name="DetailPanel" type="PanelContainer" parent="Margin/VBox/ContentRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 160)
+custom_minimum_size = Vector2(0, 180)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -146,6 +178,35 @@ autowrap_mode = 3
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
+text = ""
+autowrap_mode = 3
+
+[node name="DetailOwnershipLabel" type="Label" parent="Margin/VBox/ContentRow/DetailPanel/DetailScroll/DetailMargin/DetailVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = ""
+autowrap_mode = 3
+
+[node name="DetailRepresentativeLabel" type="Label" parent="Margin/VBox/ContentRow/DetailPanel/DetailScroll/DetailMargin/DetailVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = ""
+autowrap_mode = 3
+
+[node name="SetRepresentativeButton" type="Button" parent="Margin/VBox/ContentRow/DetailPanel/DetailScroll/DetailMargin/DetailVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "設為代表角色"
+
+[node name="MutationMessageLabel" type="Label" parent="Margin/VBox/ContentRow/DetailPanel/DetailScroll/DetailMargin/DetailVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
 text = ""
 autowrap_mode = 3
 

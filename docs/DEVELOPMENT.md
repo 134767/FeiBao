@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.5.0**
+- **App version:** **0.6.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -41,7 +41,7 @@ godot --headless --path . --quit-after 5
 
 Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initialize) → Login.
 
-## Local Player Save (0.5.0)
+## Local Player Save (0.5.0+)
 
 - Production: `user://feibao/player_profile.json`
 - Codec: exact-integer schema/revision; no silent fractional truncation
@@ -53,6 +53,13 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - save_text write failures restore full pre-write raw-byte artifact snapshots
 - Snapshot authority is PackedByteArray (`get_buffer` / `store_buffer`), not String decode/re-encode
 - Tests: `user://feibao_tests/<case>/` with canonical containment; fingerprint production artifacts instead of requiring them to be absent
+- 0.6.0: `grant_character` / `select_character` share the same commit helper; schema stays 1
+
+## Character Ownership (0.6.0)
+
+- Default ownership: `feibao_dev` only; partners are not auto-granted
+- Catalog UI filters and representative selection; no grant UI in this version
+- See `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`
 
 ## Git Branch & PR Rules
 

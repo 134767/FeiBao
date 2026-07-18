@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 0.5.0** — local player profile save foundation.
+**Current version: 0.6.0** — character ownership integrated with the catalog.
 
 ## Requirements
 
@@ -22,18 +22,19 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-## What 0.5.0 Adds
+## What 0.6.0 Adds
 
-- Versioned local `PlayerProfile` (schema 1) under `user://feibao/`
-- Strict JSON codec + staged recoverable write with backup
-- `PlayerData` autoload; Boot loads profile before Login
-- Login pre-fills saved name but never auto-logs in
-- Default owned character id: `feibao_dev` (definitions stay separate)
+- Catalog shows owned / unowned / representative / focused states
+- Filters: 全部 / 已持有 / 未持有; set representative from detail (owned only)
+- `PlayerData.grant_character` / `select_character` with catalog validation
+- Profile schema remains **1** (0.5.0 saves need no migration)
+- Default still owns only `feibao_dev`; no auto-grant of partners
 
 ## Docs
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
+- `docs/FEIBAO_0.6.0_CHARACTER_OWNERSHIP.md`
 - `docs/FEIBAO_0.5.0_LOCAL_PLAYER_SAVE.md`
 - `docs/FEIBAO_0.4.0_CHARACTER_CATALOG.md`
 

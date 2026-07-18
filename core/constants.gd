@@ -3,7 +3,7 @@ class_name FeiBaoConstants
 extends RefCounted
 
 const APP_NAME: String = "FeiBao"
-const APP_VERSION: String = "0.5.0"
+const APP_VERSION: String = "0.6.0"
 const DESIGN_WIDTH: int = 720
 const DESIGN_HEIGHT: int = 1280
 const ORIENTATION: String = "portrait"
