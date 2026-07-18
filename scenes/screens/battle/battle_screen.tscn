@@ -34,6 +34,7 @@ theme_override_constants/separation = 12
 [node name="BackButton" type="Button" parent="Margin/RootVBox/HeaderRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 48)
+focus_mode = 2
 layout_mode = 2
 text = "返回"
 
@@ -72,13 +73,20 @@ autowrap_mode = 3
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
-text = "戰鬥系統殼層 · 尚無真實戰鬥"
+text = "戰鬥系統殼層 · 開發樣本 · 尚無真實戰鬥"
 autowrap_mode = 3
 
 [node name="StageNameLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
+text = ""
+autowrap_mode = 3
+
+[node name="StageNumberLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = ""
 autowrap_mode = 3
 
@@ -93,6 +101,13 @@ autowrap_mode = 3
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
+text = ""
+autowrap_mode = 3
+
+[node name="LeaderLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
 text = ""
 autowrap_mode = 3
 
@@ -127,6 +142,7 @@ alignment = 1
 [node name="LeaveButton" type="Button" parent="Margin/RootVBox/BottomActions"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 48)
+focus_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 text = "離開戰鬥"

@@ -24,13 +24,14 @@ Constants:
 ## Adventure Module (0.8.0 / 0.9.0)
 
 - Area story (`story_intro`) shown on adventure selection only
-- Stage grid + prepare button → AdventureState + BattleSession → BattleScreen
+- Stage grid + **準備此關卡** → AdventureState only
+- **進入戰鬥** → BattleState session + BattleScreen (transactional)
 - No real combat / completion write in this version
 
 ## Battle Session (0.9.0)
 
-- Entered only from adventure prepare (not lobby grid)
-- Leave clears BattleSession and returns to adventure (history or fallback)
+- Entered only via Adventure **進入戰鬥** (not lobby grid)
+- Leave clears BattleState and returns to adventure (history or fallback; nav failure restores session)
 
 ## Party Module (0.7.0)
 

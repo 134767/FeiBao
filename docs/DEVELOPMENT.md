@@ -77,8 +77,8 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 
 ## Battle Session Shell (0.9.0)
 
-- BattleSession memory-only; BattleScreen shell (no real combat)
-- Adventure prepare creates session and navigates to battle
+- BattleState memory-only; BattleScreen shell (no real combat)
+- Adventure: prepare stage, then enter battle (separate CTA, transactional nav)
 - See `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`
 
 ## Git Branch & PR Rules

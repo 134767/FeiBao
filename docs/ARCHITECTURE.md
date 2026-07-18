@@ -55,8 +55,9 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 
 ## Battle Session Shell (0.9.0)
 
-- BattleSession memory-only snapshot from prepared stage + active party.
-- Dedicated BattleScreen; leave clears session and returns to adventure.
+- BattleState memory-only session from prepared stage + active party snapshot.
+- Two-step Adventure flow: prepare stage, then enter battle (transactional).
+- Dedicated BattleScreen (not a lobby module); leave clears session with rollback on nav failure.
 - No real combat, completion write, or schema change.
 
 See `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`.

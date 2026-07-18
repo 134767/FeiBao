@@ -82,7 +82,7 @@ func _autoload_scripts_parsable() -> bool:
 		"res://autoload/game_config.gd",
 		"res://autoload/navigation_state.gd",
 		"res://autoload/adventure_state.gd",
-		"res://autoload/battle_session.gd",
+		"res://autoload/battle_state.gd",
 	])
 	for path in paths:
 		var script: Script = load(path) as Script

@@ -16,8 +16,8 @@ func run_all() -> void:
 	var prod_before: Dictionary = _snapshot_production()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
-	if is_instance_valid(BattleSession):
-		BattleSession.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	_run_catalog_tests()
 	_run_adventure_state_tests()
 	_run_registry_tests()
@@ -26,8 +26,8 @@ func run_all() -> void:
 	_cleanup_cases()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
-	if is_instance_valid(BattleSession):
-		BattleSession.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
 	PlayerData.reset_runtime_state_for_tests()
 	var prod_after: Dictionary = _snapshot_production()
@@ -52,8 +52,8 @@ func _begin_case(tag: String) -> String:
 	PlayerData.cleanup_test_artifacts()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
-	if is_instance_valid(BattleSession):
-		BattleSession.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	return path
 
 

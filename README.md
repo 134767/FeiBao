@@ -24,9 +24,9 @@ godot --headless --path . --script res://tests/test_runner.gd
 
 ## What 0.9.0 Adds
 
-- Memory-only BattleSession snapshot (stage + party, no disk)
+- Memory-only BattleState session (stage + party snapshot, no disk)
 - Dedicated BattleScreen shell (not a lobby module)
-- Adventure prepare → session → battle navigation + safe leave
+- Adventure two-step: prepare stage, then enter battle (transactional leave/enter)
 - PlayerProfile schema remains **2**; StageCatalog schema remains **1**
 - No real combat / completion persistence
 

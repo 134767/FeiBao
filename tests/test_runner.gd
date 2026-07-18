@@ -36,18 +36,18 @@ func _run_tests() -> void:
 	])
 
 	var adventure_state: Node = root.get_node_or_null("AdventureState")
-	var battle_session: Node = root.get_node_or_null("BattleSession")
+	var battle_state: Node = root.get_node_or_null("BattleState")
 	if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
 		adventure_state.call("reset_runtime_state_for_tests")
-	if battle_session != null and battle_session.has_method("reset_runtime_state_for_tests"):
-		battle_session.call("reset_runtime_state_for_tests")
+	if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
+		battle_state.call("reset_runtime_state_for_tests")
 
 	for path in suites:
 		print("--- Suite: %s ---" % path)
 		if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
 			adventure_state.call("reset_runtime_state_for_tests")
-		if battle_session != null and battle_session.has_method("reset_runtime_state_for_tests"):
-			battle_session.call("reset_runtime_state_for_tests")
+		if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
+			battle_state.call("reset_runtime_state_for_tests")
 		var script: GDScript = load(path) as GDScript
 		if script == null:
 			print("[FAIL] load_suite: %s" % path)
@@ -72,8 +72,8 @@ func _run_tests() -> void:
 		player_data.call("reset_runtime_state_for_tests")
 	if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
 		adventure_state.call("reset_runtime_state_for_tests")
-	if battle_session != null and battle_session.has_method("reset_runtime_state_for_tests"):
-		battle_session.call("reset_runtime_state_for_tests")
+	if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
+		battle_state.call("reset_runtime_state_for_tests")
 
 	var prod_after: Dictionary = _snapshot_production_artifacts()
 	if not _production_fingerprints_match(prod_before, prod_after):

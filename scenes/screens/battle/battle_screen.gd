@@ -1,19 +1,23 @@
 ## Dedicated battle session shell screen (0.9.0). No real combat.
+## Renders BattleState session snapshot only — not live PlayerData as truth.
 extends Control
 
 signal back_requested
 signal leave_requested
 
-const MSG_SHELL: String = "戰鬥系統殼層 · 尚無真實戰鬥"
+const MSG_SHELL: String = "戰鬥系統殼層 · 開發樣本 · 尚無真實戰鬥"
 const MSG_NO_SESSION: String = "沒有有效的戰鬥工作階段"
+const MSG_CHAR_MISSING: String = "出戰角色定義缺失"
 const MSG_LEAVE: String = "離開戰鬥"
 const SEED_HINT: String = "本頁為戰鬥工作階段殼層，非正式戰鬥。"
 const PARTY_LINE_FMT: String = "%d. %s%s"
 const LEADER_MARK: String = "（領隊）"
 const STAGE_LINE_FMT: String = "關卡：%s"
+const STAGE_NUM_FMT: String = "關卡編號：%d"
 const AREA_LINE_FMT: String = "區域：%s"
 const SUMMARY_LINE_FMT: String = "%s"
 const PARTY_HEADER_FMT: String = "出戰隊伍 %d 人"
+const LEADER_LINE_FMT: String = "隊長：%s"
 
 @onready var _title_label: Label = %TitleLabel
 @onready var _back_button: Button = %BackButton
@@ -22,9 +26,11 @@ const PARTY_HEADER_FMT: String = "出戰隊伍 %d 人"
 @onready var _body_scroll: ScrollContainer = %BodyScroll
 @onready var _body_content: Control = %BodyContent
 @onready var _stage_name_label: Label = %StageNameLabel
+@onready var _stage_number_label: Label = %StageNumberLabel
 @onready var _area_name_label: Label = %AreaNameLabel
 @onready var _stage_summary_label: Label = %StageSummaryLabel
 @onready var _shell_status_label: Label = %ShellStatusLabel
+@onready var _leader_label: Label = %LeaderLabel
 @onready var _party_header_label: Label = %PartyHeaderLabel
 @onready var _party_list_label: Label = %PartyListLabel
 @onready var _error_label: Label = %ErrorLabel
@@ -36,6 +42,7 @@ var _signals_bound: bool = false
 var _session_signals_bound: bool = false
 var _session_ok: bool = false
 var _leave_count_for_tests: int = 0
+var _leave_nav_result_override_for_tests: Variant = null
 
 
 func _ready() -> void:
@@ -64,16 +71,16 @@ func _bind_signals() -> void:
 
 
 func _bind_session_signals() -> void:
-	if is_instance_valid(BattleSession) and not _session_signals_bound:
-		if not BattleSession.session_changed.is_connected(_on_session_changed):
-			BattleSession.session_changed.connect(_on_session_changed)
+	if is_instance_valid(BattleState) and not _session_signals_bound:
+		if not BattleState.session_changed.is_connected(_on_session_changed):
+			BattleState.session_changed.connect(_on_session_changed)
 		_session_signals_bound = true
 
 
 func _unbind_session_signals() -> void:
-	if is_instance_valid(BattleSession) and _session_signals_bound:
-		if BattleSession.session_changed.is_connected(_on_session_changed):
-			BattleSession.session_changed.disconnect(_on_session_changed)
+	if is_instance_valid(BattleState) and _session_signals_bound:
+		if BattleState.session_changed.is_connected(_on_session_changed):
+			BattleState.session_changed.disconnect(_on_session_changed)
 	_session_signals_bound = false
 
 
@@ -96,9 +103,11 @@ func _reload_all() -> void:
 	if _back_button != null:
 		_back_button.text = "返回"
 		_back_button.custom_minimum_size = Vector2(maxf(_back_button.custom_minimum_size.x, 96), 48)
+		_back_button.focus_mode = Control.FOCUS_ALL
 	if _leave_button != null:
 		_leave_button.text = MSG_LEAVE
 		_leave_button.custom_minimum_size = Vector2(maxf(_leave_button.custom_minimum_size.x, 120), 48)
+		_leave_button.focus_mode = Control.FOCUS_ALL
 	if _seed_hint_label != null:
 		_seed_hint_label.text = SEED_HINT
 	if _shell_status_label != null:
@@ -108,44 +117,95 @@ func _reload_all() -> void:
 
 
 func _apply_session_ui() -> void:
-	_session_ok = is_instance_valid(BattleSession) and BattleSession.has_active_session()
+	_session_ok = is_instance_valid(BattleState) and BattleState.has_active_session()
 	if not _session_ok:
-		if _stage_name_label != null:
-			_stage_name_label.text = ""
-		if _area_name_label != null:
-			_area_name_label.text = ""
-		if _stage_summary_label != null:
-			_stage_summary_label.text = ""
-		if _party_header_label != null:
-			_party_header_label.text = ""
-		if _party_list_label != null:
-			_party_list_label.text = ""
+		_clear_content_labels()
 		_show_error(MSG_NO_SESSION)
 		if _leave_button != null:
 			_leave_button.disabled = false
 		return
 
+	var party_ids: Array[StringName] = BattleState.get_party_character_ids()
+	var leader_id: StringName = BattleState.get_leader_character_id()
+	var name_result: Dictionary = _resolve_party_display_names(party_ids)
+	if not bool(name_result.get("ok", false)):
+		_clear_content_labels()
+		_show_error(str(name_result.get("error", MSG_CHAR_MISSING)))
+		_session_ok = false
+		if _leave_button != null:
+			_leave_button.disabled = false
+		return
+
 	_hide_error()
+	var names: Array[String] = []
+	var raw_names: Variant = name_result.get("names", [])
+	if raw_names is Array:
+		for n in raw_names as Array:
+			names.append(str(n))
 	if _stage_name_label != null:
-		_stage_name_label.text = STAGE_LINE_FMT % BattleSession.get_stage_display_name()
+		_stage_name_label.text = STAGE_LINE_FMT % BattleState.get_stage_display_name()
+	if _stage_number_label != null:
+		_stage_number_label.text = STAGE_NUM_FMT % BattleState.get_stage_number()
 	if _area_name_label != null:
-		_area_name_label.text = AREA_LINE_FMT % BattleSession.get_area_display_name()
+		_area_name_label.text = AREA_LINE_FMT % BattleState.get_area_display_name()
 	if _stage_summary_label != null:
-		_stage_summary_label.text = SUMMARY_LINE_FMT % BattleSession.get_stage_summary()
-	var party_ids: Array[StringName] = BattleSession.get_party_character_ids()
-	var names: Array[String] = BattleSession.get_party_display_names()
-	var leader_id: StringName = BattleSession.get_leader_character_id()
+		_stage_summary_label.text = SUMMARY_LINE_FMT % BattleState.get_stage_summary()
+	if _leader_label != null:
+		var leader_name: String = ""
+		for i in party_ids.size():
+			if party_ids[i] == leader_id and i < names.size():
+				leader_name = names[i]
+				break
+		_leader_label.text = LEADER_LINE_FMT % leader_name
 	if _party_header_label != null:
 		_party_header_label.text = PARTY_HEADER_FMT % party_ids.size()
 	if _party_list_label != null:
 		var lines: PackedStringArray = PackedStringArray()
 		for i in party_ids.size():
-			var nm: String = names[i] if i < names.size() else str(party_ids[i])
+			var nm: String = names[i] if i < names.size() else ""
 			var mark: String = LEADER_MARK if party_ids[i] == leader_id else ""
 			lines.append(PARTY_LINE_FMT % [i + 1, nm, mark])
 		_party_list_label.text = "\n".join(lines)
 	if _leave_button != null:
 		_leave_button.disabled = false
+
+
+func _clear_content_labels() -> void:
+	if _stage_name_label != null:
+		_stage_name_label.text = ""
+	if _stage_number_label != null:
+		_stage_number_label.text = ""
+	if _area_name_label != null:
+		_area_name_label.text = ""
+	if _stage_summary_label != null:
+		_stage_summary_label.text = ""
+	if _leader_label != null:
+		_leader_label.text = ""
+	if _party_header_label != null:
+		_party_header_label.text = ""
+	if _party_list_label != null:
+		_party_list_label.text = ""
+
+
+## Resolve catalog display names; fail closed if any party id is missing (never use raw id as formal name).
+func _resolve_party_display_names(party_ids: Array[StringName]) -> Dictionary:
+	var names: Array[String] = []
+	var cat: Dictionary = CharacterCatalog.load_default()
+	if not bool(cat.get("ok", false)):
+		return {"ok": false, "error": MSG_CHAR_MISSING, "names": names}
+	var by_id: Dictionary = {}
+	for item in cat.get("characters", []):
+		if item is CharacterDefinition:
+			var d: CharacterDefinition = item as CharacterDefinition
+			by_id[d.get_id()] = d.get_display_name()
+	for id in party_ids:
+		if not by_id.has(id):
+			return {"ok": false, "error": MSG_CHAR_MISSING, "names": []}
+		var dn: String = str(by_id[id])
+		if dn.is_empty():
+			return {"ok": false, "error": MSG_CHAR_MISSING, "names": []}
+		names.append(dn)
+	return {"ok": true, "error": "", "names": names}
 
 
 func _on_session_changed(_stage_id: StringName, _active: bool) -> void:
@@ -162,16 +222,31 @@ func _on_leave_pressed() -> void:
 	request_leave()
 
 
-## Clear memory session then leave via history/fallback (adventure).
+## Transaction: snapshot → clear → navigate; restore session if navigation fails.
 func request_leave() -> bool:
 	_leave_count_for_tests += 1
-	if is_instance_valid(BattleSession) and BattleSession.has_active_session():
-		BattleSession.clear_session()
-	var ok: bool = NavigationState.go_back_or_fallback()
-	if ok:
-		leave_requested.emit()
-		back_requested.emit()
-	return ok
+	if not is_instance_valid(BattleState):
+		return _navigate_leave()
+
+	var prior: Dictionary = BattleState.capture_session_snapshot()
+	if BattleState.has_active_session():
+		BattleState.clear_session()
+
+	var nav_ok: bool = _navigate_leave()
+	if not nav_ok:
+		BattleState.restore_session_snapshot(prior)
+		_apply_session_ui()
+		return false
+
+	leave_requested.emit()
+	back_requested.emit()
+	return true
+
+
+func _navigate_leave() -> bool:
+	if _leave_nav_result_override_for_tests is bool:
+		return bool(_leave_nav_result_override_for_tests)
+	return NavigationState.go_back_or_fallback()
 
 
 func _show_error(message: String) -> void:
@@ -202,39 +277,35 @@ func get_body_scroll() -> ScrollContainer:
 
 
 func get_stage_name_text() -> String:
-	if _stage_name_label == null:
-		return ""
-	return _stage_name_label.text
+	return _stage_name_label.text if _stage_name_label != null else ""
+
+
+func get_stage_number_text() -> String:
+	return _stage_number_label.text if _stage_number_label != null else ""
 
 
 func get_area_name_text() -> String:
-	if _area_name_label == null:
-		return ""
-	return _area_name_label.text
+	return _area_name_label.text if _area_name_label != null else ""
 
 
 func get_stage_summary_text() -> String:
-	if _stage_summary_label == null:
-		return ""
-	return _stage_summary_label.text
+	return _stage_summary_label.text if _stage_summary_label != null else ""
+
+
+func get_leader_text() -> String:
+	return _leader_label.text if _leader_label != null else ""
 
 
 func get_party_list_text() -> String:
-	if _party_list_label == null:
-		return ""
-	return _party_list_label.text
+	return _party_list_label.text if _party_list_label != null else ""
 
 
 func get_party_header_text() -> String:
-	if _party_header_label == null:
-		return ""
-	return _party_header_label.text
+	return _party_header_label.text if _party_header_label != null else ""
 
 
 func get_shell_status_text() -> String:
-	if _shell_status_label == null:
-		return ""
-	return _shell_status_label.text
+	return _shell_status_label.text if _shell_status_label != null else ""
 
 
 func is_error_state_visible() -> bool:
@@ -242,9 +313,7 @@ func is_error_state_visible() -> bool:
 
 
 func get_error_text() -> String:
-	if _error_label == null:
-		return ""
-	return _error_label.text
+	return _error_label.text if _error_label != null else ""
 
 
 func is_session_ok() -> bool:
@@ -261,6 +330,14 @@ func reset_leave_count_for_tests() -> void:
 
 func press_leave_for_test() -> void:
 	_on_leave_pressed()
+
+
+func set_leave_nav_result_override_for_tests(ok: bool) -> void:
+	_leave_nav_result_override_for_tests = ok
+
+
+func clear_leave_nav_result_override_for_tests() -> void:
+	_leave_nav_result_override_for_tests = null
 
 
 func ensure_control_visible_for_test(control: Control) -> void:
