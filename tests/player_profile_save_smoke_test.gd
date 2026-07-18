@@ -24,6 +24,7 @@ func run_all() -> void:
 	_run_boot_login_tests()
 	_run_login_transaction_tests()
 	_run_save_failure_restore_tests()
+	_run_binary_exact_snapshot_tests()
 	_cleanup_all_cases()
 	SaveFileStore.clear_test_write_failure_step()
 	SaveFileStore.clear_test_restore_failure()
@@ -884,6 +885,196 @@ func _run_save_failure_restore_tests() -> void:
 	SaveFileStore.remove_test_artifacts(p3)
 	print("[INFO] save_text failure artifact restoration passed")
 
+
+func _bytes_from_array(arr: Array) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(arr.size())
+	for i in arr.size():
+		out[i] = int(arr[i])
+	return out
+
+
+func _write_raw_bytes(path: String, bytes: PackedByteArray) -> void:
+	var dir: String = path.get_base_dir()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	f.store_buffer(bytes)
+	f.close()
+
+
+func _read_raw_bytes(path: String) -> PackedByteArray:
+	if not FileAccess.file_exists(path):
+		return PackedByteArray()
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var n: int = int(f.get_length())
+	var b: PackedByteArray = f.get_buffer(n)
+	f.close()
+	return b
+
+
+func _raw_byte_fingerprint(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {"exists": false, "sha256": "", "length": -1, "bytes": PackedByteArray()}
+	var b: PackedByteArray = _read_raw_bytes(path)
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(b)
+	return {
+		"exists": true,
+		"sha256": ctx.finish().hex_encode(),
+		"length": b.size(),
+		"bytes": b,
+	}
+
+
+func _run_binary_exact_snapshot_tests() -> void:
+	var invalid_utf8: PackedByteArray = _bytes_from_array([0xFF, 0xFE, 0x80, 0x00, 0x7B, 0x0D, 0x0A])
+	var bom_crlf: PackedByteArray = _bytes_from_array([0xEF, 0xBB, 0xBF, 0x7B, 0x0D, 0x0A, 0x7D])
+	var nul_bytes: PackedByteArray = _bytes_from_array([0x41, 0x00, 0x42, 0x00, 0x43])
+
+	var case_dir: String = _unique_case("bin_snap")
+	var primary: String = case_dir.path_join("player_profile.json")
+	var tmp: String = primary + ".tmp"
+	var bak: String = primary + ".bak"
+	_write_raw_bytes(primary, invalid_utf8)
+	_write_raw_bytes(tmp, bom_crlf)
+	_write_raw_bytes(bak, nul_bytes)
+
+	var snap: Dictionary = SaveFileStore.capture_artifact_snapshot(primary)
+	_assert_true("bin_capture_ok", bool(snap.get("ok", false)))
+	_assert_eq("bin_kind", str(snap.get("snapshot_kind", "")), "save_artifact_snapshot_v2")
+	var arts: Dictionary = snap.get("artifacts", {}) as Dictionary
+	var ap: Dictionary = arts.get("primary", {}) as Dictionary
+	var at: Dictionary = arts.get("temporary", {}) as Dictionary
+	var ab: Dictionary = arts.get("backup", {}) as Dictionary
+	_assert_true("bin_pri_exists", bool(ap.get("exists", false)))
+	_assert_true("bin_tmp_exists", bool(at.get("exists", false)))
+	_assert_true("bin_bak_exists", bool(ab.get("exists", false)))
+	_assert_true("bin_pri_bytes_type", typeof(ap.get("bytes", null)) == TYPE_PACKED_BYTE_ARRAY)
+	_assert_true("bin_tmp_bytes_type", typeof(at.get("bytes", null)) == TYPE_PACKED_BYTE_ARRAY)
+	_assert_true("bin_bak_bytes_type", typeof(ab.get("bytes", null)) == TYPE_PACKED_BYTE_ARRAY)
+	_assert_true("bin_pri_eq", ap.get("bytes") == invalid_utf8)
+	_assert_true("bin_tmp_eq", at.get("bytes") == bom_crlf)
+	_assert_true("bin_bak_eq", ab.get("bytes") == nul_bytes)
+	_assert_eq("bin_pri_len", int(ap.get("length", -1)), invalid_utf8.size())
+	_assert_eq("bin_tmp_len", int(at.get("length", -1)), bom_crlf.size())
+	_assert_eq("bin_bak_len", int(ab.get("length", -1)), nul_bytes.size())
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(invalid_utf8)
+	_assert_eq("bin_pri_sha", str(ap.get("sha256", "")), ctx.finish().hex_encode())
+
+	_write_raw_bytes(primary, _bytes_from_array([0x11, 0x22]))
+	_write_raw_bytes(tmp, _bytes_from_array([0x33]))
+	_write_raw_bytes(bak, _bytes_from_array([0x44, 0x55, 0x66]))
+	var rest: Dictionary = SaveFileStore.restore_artifact_snapshot(primary, snap)
+	_assert_true("bin_restore_ok", bool(rest.get("ok", false)))
+	_assert_true("bin_restore_match", SaveFileStore.artifact_snapshot_matches(primary, snap))
+	_assert_true("bin_pri_restored", _read_raw_bytes(primary) == invalid_utf8)
+	_assert_true("bin_tmp_restored", _read_raw_bytes(tmp) == bom_crlf)
+	_assert_true("bin_bak_restored", _read_raw_bytes(bak) == nul_bytes)
+	_assert_true("bin_bom_preserved", _read_raw_bytes(tmp)[0] == 0xEF and _read_raw_bytes(tmp)[1] == 0xBB)
+	_assert_true("bin_nul_preserved", _read_raw_bytes(bak)[1] == 0x00)
+
+	var path_tx: String = _begin_case("bin_tx")
+	var pri: String = path_tx.path_join("player_profile.json")
+	var t_rec: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("RecoveryName")
+	).get("text", ""))
+	_write_raw_bytes(pri, invalid_utf8)
+	_write_raw(pri + ".bak", t_rec)
+	PlayerData.configure_test_storage_path(path_tx)
+	PlayerData.reset_runtime_state_for_tests()
+	var init_rb: Dictionary = PlayerData.initialize()
+	_assert_eq("bin_tx_init", str(init_rb.get("state", "")), "RECOVERED_BACKUP")
+	var snap_tx: Dictionary = SaveFileStore.capture_artifact_snapshot(pri)
+	var fp_pri: Dictionary = _raw_byte_fingerprint(pri)
+	var fp_bak: Dictionary = _raw_byte_fingerprint(pri + ".bak")
+	_nav().call("reset", &"login")
+	var login_packed: PackedScene = load("res://scenes/screens/login/login_screen.tscn") as PackedScene
+	var login: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login)
+	login.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("bin_tx_fail", login.call("submit_player_name", "CandidateName") == false)
+	_assert_true("bin_tx_match", SaveFileStore.artifact_snapshot_matches(pri, snap_tx))
+	var fp_pri2: Dictionary = _raw_byte_fingerprint(pri)
+	var fp_bak2: Dictionary = _raw_byte_fingerprint(pri + ".bak")
+	_assert_eq("bin_tx_pri_sha", str(fp_pri.get("sha256")), str(fp_pri2.get("sha256")))
+	_assert_eq("bin_tx_bak_sha", str(fp_bak.get("sha256")), str(fp_bak2.get("sha256")))
+	_assert_true("bin_tx_pri_bytes", fp_pri2.get("bytes") == invalid_utf8)
+	_assert_true("bin_tx_no_candidate", _read_raw(pri + ".bak").find("CandidateName") < 0)
+	PlayerData.reset_runtime_state_for_tests()
+	var init2: Dictionary = PlayerData.initialize()
+	_assert_eq("bin_tx_rec_name", PlayerData.get_player_name(), "RecoveryName")
+	login.queue_free()
+
+	var path_tmp: String = _begin_case("bin_tmp")
+	PlayerData.initialize()
+	PlayerData.save_player_name("TmpHost")
+	var pri_t: String = PlayerData.get_primary_path()
+	_write_raw_bytes(pri_t + ".tmp", invalid_utf8)
+	var snap_t: Dictionary = SaveFileStore.capture_artifact_snapshot(pri_t)
+	_nav().call("reset", &"login")
+	var login_t: Control = login_packed.instantiate() as Control
+	_tree.root.add_child(login_t)
+	login_t.call("set_navigate_to_lobby_override", func() -> bool: return false)
+	_assert_true("bin_tmp_fail", login_t.call("submit_player_name", "TmpCand") == false)
+	_assert_true("bin_tmp_match", SaveFileStore.artifact_snapshot_matches(pri_t, snap_t))
+	_assert_true("bin_tmp_bytes", _read_raw_bytes(pri_t + ".tmp") == invalid_utf8)
+	login_t.queue_free()
+
+	var path_sf: String = _unique_case("bin_sf")
+	var pri_sf: String = path_sf.path_join("player_profile.json")
+	var good: String = str(PlayerProfileCodec.encode_profile(
+		PlayerProfile.create_default().with_player_name("BinGood")
+	).get("text", ""))
+	var validator := func(t: String) -> bool:
+		return bool(PlayerProfileCodec.parse_json_text(t).get("ok", false))
+	SaveFileStore.save_text(pri_sf, good, validator)
+	_write_raw_bytes(pri_sf + ".tmp", nul_bytes)
+	var snap_sf: Dictionary = SaveFileStore.capture_artifact_snapshot(pri_sf)
+	SaveFileStore.set_test_write_failure_step("primary_write")
+	var sfail: Dictionary = SaveFileStore.save_text(pri_sf, good, validator)
+	SaveFileStore.clear_test_write_failure_step()
+	_assert_true("bin_sf_fail", bool(sfail.get("ok", true)) == false)
+	_assert_true("bin_sf_restore_attempted", bool(sfail.get("restore_attempted", false)))
+	_assert_true("bin_sf_restore_ok", bool(sfail.get("restore_ok", false)))
+	_assert_true("bin_sf_match", SaveFileStore.artifact_snapshot_matches(pri_sf, snap_sf))
+	_assert_true("bin_sf_tmp_bytes", _read_raw_bytes(pri_sf + ".tmp") == nul_bytes)
+
+	var bad_kind: Dictionary = snap.duplicate(true)
+	bad_kind["snapshot_kind"] = "save_artifact_snapshot_v1"
+	_assert_true("bin_tamper_kind", bool(SaveFileStore.restore_artifact_snapshot(primary, bad_kind).get("ok", true)) == false)
+	var bad_path: Dictionary = snap.duplicate(true)
+	_assert_true("bin_tamper_path", bool(SaveFileStore.restore_artifact_snapshot(pri_sf, bad_path).get("ok", true)) == false)
+	var bad_missing: Dictionary = snap.duplicate(true)
+	(bad_missing["artifacts"] as Dictionary)["primary"] = {"exists": true, "readable": true, "sha256": "x", "length": 1}
+	_assert_true("bin_tamper_missing_bytes", bool(SaveFileStore.restore_artifact_snapshot(primary, bad_missing).get("ok", true)) == false)
+	var bad_type: Dictionary = snap.duplicate(true)
+	(bad_type["artifacts"] as Dictionary)["primary"] = {
+		"exists": true, "readable": true, "bytes": "not-bytes", "sha256": "x", "length": 1
+	}
+	_assert_true("bin_tamper_type", bool(SaveFileStore.restore_artifact_snapshot(primary, bad_type).get("ok", true)) == false)
+	var bad_len: Dictionary = snap.duplicate(true)
+	(bad_len["artifacts"] as Dictionary)["primary"] = {
+		"exists": true, "readable": true, "bytes": invalid_utf8, "sha256": str(ap.get("sha256")), "length": 1
+	}
+	_assert_true("bin_tamper_len", bool(SaveFileStore.restore_artifact_snapshot(primary, bad_len).get("ok", true)) == false)
+	var bad_sha: Dictionary = snap.duplicate(true)
+	(bad_sha["artifacts"] as Dictionary)["primary"] = {
+		"exists": true, "readable": true, "bytes": invalid_utf8, "sha256": "deadbeef", "length": invalid_utf8.size()
+	}
+	_assert_true("bin_tamper_sha", bool(SaveFileStore.restore_artifact_snapshot(primary, bad_sha).get("ok", true)) == false)
+	_write_raw_bytes(primary, invalid_utf8)
+	_write_raw_bytes(tmp, bom_crlf)
+	_write_raw_bytes(bak, nul_bytes)
+	var before_fp: Dictionary = _raw_byte_fingerprint(primary)
+	SaveFileStore.restore_artifact_snapshot(primary, bad_kind)
+	_assert_eq("bin_tamper_no_mod", str(before_fp.get("sha256")), str(_raw_byte_fingerprint(primary).get("sha256")))
+
+	SaveFileStore.remove_test_artifacts(primary)
+	SaveFileStore.remove_test_artifacts(pri_sf)
+	print("[INFO] binary-exact artifact snapshot/restore passed")
 
 func _assert_true(test_name: String, condition: bool) -> void:
 	if condition:

@@ -90,10 +90,20 @@ Corrupt files are **not** overwritten during `initialize()`.
    - `PlayerData.save_player_name` (save_text restores artifacts on its own write failures)
    - navigate Lobby
 5. Save failure → stay on Login; save_text leaves no partial artifacts.
-6. Navigation failure → **complete transaction rollback** of profile, AppState, PlayerData flags, and exact primary/tmp/backup bytes.
+6. Navigation failure → **complete transaction rollback** of profile, AppState, PlayerData flags, and exact primary/tmp/backup **raw bytes**.
 7. Failed candidate names must not remain on primary, temporary, or backup (and cannot reappear via backup recovery).
 8. First-login navigation failure leaves **no** save files.
-9. Prior corrupt primary bytes are restored exactly (not silently repaired).
+9. Prior corrupt primary bytes are restored exactly (not silently repaired), including invalid UTF-8 / BOM / NUL payloads.
+
+### Artifact snapshot (v2)
+
+- Kind: `save_artifact_snapshot_v2`
+- Authority content: **PackedByteArray** (not String)
+- Capture uses `get_buffer` / raw length; SHA-256 hashes the raw bytes
+- Restore uses `store_buffer` and re-verifies bytes/length/hash
+- Invalid UTF-8 and other non-text corrupt bytes can still be captured and restored exactly
+- Snapshots live only in memory for the active transaction
+- Normal profile payloads remain UTF-8 JSON via `save_text`
 
 ## Character Boundary
 

@@ -13,7 +13,7 @@ const FILE_VALID: String = "VALID"
 const FILE_INVALID: String = "INVALID"
 const FILE_UNREADABLE: String = "UNREADABLE"
 
-const SNAPSHOT_KIND: String = "save_artifact_snapshot_v1"
+const SNAPSHOT_KIND: String = "save_artifact_snapshot_v2"
 
 const TEST_ROOT_VIRTUAL: String = "user://feibao_tests"
 const TEST_ROOT_PREFIX: String = "user://feibao_tests/"
@@ -179,7 +179,11 @@ static func artifact_snapshot_matches(primary_path: String, snapshot: Dictionary
 				return false
 			if int(a.get("length", -1)) != int(b.get("length", -2)):
 				return false
-			if str(a.get("text", "")) != str(b.get("text", "")):
+			var ab: Variant = a.get("bytes", PackedByteArray())
+			var bb: Variant = b.get("bytes", PackedByteArray())
+			if typeof(ab) != TYPE_PACKED_BYTE_ARRAY or typeof(bb) != TYPE_PACKED_BYTE_ARRAY:
+				return false
+			if ab != bb:
 				return false
 	return true
 
@@ -202,8 +206,6 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 	var backup_info: Dictionary = classify_file(backup_path, validator)
 	var pstate: String = str(primary_info.get("state", FILE_MISSING))
 	var bstate: String = str(backup_info.get("state", FILE_MISSING))
-	var primary_bytes: String = str(primary_info.get("text", ""))
-
 	# Fail-closed when no validated recovery source can be preserved/used.
 	if pstate != FILE_VALID and bstate != FILE_VALID and not (pstate == FILE_MISSING and bstate == FILE_MISSING):
 		return _save_fail_full(
@@ -220,6 +222,7 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 	if not dir_path.is_empty() and not _ensure_dir(dir_path):
 		return _fail_and_restore(pre_snap, primary_path, "cannot create parent directory", pstate, bstate)
 
+	# Profile payload remains UTF-8 JSON text for public save_text API.
 	if _test_write_fail_step == "tmp_write" or not _write_all(tmp_path, text):
 		return _fail_and_restore(pre_snap, primary_path, "failed to write temporary file", pstate, bstate)
 
@@ -231,7 +234,11 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 	var backup_preserved: bool = false
 
 	if pstate == FILE_VALID:
-		if _test_write_fail_step == "backup_write" or not _write_all(backup_path, primary_bytes):
+		# Copy validated primary as raw bytes so backup stays byte-exact.
+		var primary_raw: PackedByteArray = _read_all_bytes(primary_path)
+		if primary_raw.is_empty() and FileAccess.file_exists(primary_path):
+			return _fail_and_restore(pre_snap, primary_path, "failed to read validated primary bytes", pstate, bstate)
+		if _test_write_fail_step == "backup_write" or not _write_all_bytes(backup_path, primary_raw):
 			return _fail_and_restore(pre_snap, primary_path, "failed to write backup from validated primary", pstate, bstate)
 		var bak_check: Dictionary = classify_file(backup_path, validator)
 		if str(bak_check.get("state", "")) != FILE_VALID:
@@ -240,9 +247,9 @@ static func save_text(primary_path: String, text: String, validator: Callable) -
 	elif bstate == FILE_VALID:
 		backup_preserved = true
 
-	if _test_write_fail_step == "primary_write" or not _write_all(primary_path, tmp_read):
+	var tmp_raw: PackedByteArray = _read_all_bytes(tmp_path)
+	if _test_write_fail_step == "primary_write" or not _write_all_bytes(primary_path, tmp_raw):
 		return _fail_and_restore(pre_snap, primary_path, "failed to replace primary", pstate, bstate, backup_created, backup_preserved)
-
 	_safe_remove(tmp_path)
 	return {
 		"ok": true,
@@ -330,7 +337,7 @@ static func _capture_one_artifact(path: String) -> Dictionary:
 			"data": {
 				"exists": false,
 				"readable": false,
-				"text": "",
+				"bytes": PackedByteArray(),
 				"sha256": "",
 				"length": -1,
 			},
@@ -338,18 +345,20 @@ static func _capture_one_artifact(path: String) -> Dictionary:
 	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return {"ok": false, "error": "unreadable"}
-	var text: String = f.get_as_text()
+	var expected_len: int = int(f.get_length())
+	var bytes: PackedByteArray = f.get_buffer(expected_len)
 	var err: Error = f.get_error()
 	f.close()
 	if err != OK and err != ERR_FILE_EOF:
 		return {"ok": false, "error": "read error"}
-	var bytes: PackedByteArray = text.to_utf8_buffer()
+	if bytes.size() != expected_len:
+		return {"ok": false, "error": "incomplete read"}
 	return {
 		"ok": true,
 		"data": {
 			"exists": true,
 			"readable": true,
-			"text": text,
+			"bytes": bytes,
 			"sha256": _sha256_bytes(bytes),
 			"length": bytes.size(),
 		},
@@ -365,22 +374,33 @@ static func _restore_one_artifact(path: String, entry: Dictionary) -> Dictionary
 		return {"ok": true, "error": ""}
 	if not bool(entry.get("readable", false)):
 		return {"ok": false, "error": "snapshot entry not readable"}
-	var text: String = str(entry.get("text", ""))
+	var bytes_v: Variant = entry.get("bytes", null)
+	if typeof(bytes_v) != TYPE_PACKED_BYTE_ARRAY:
+		return {"ok": false, "error": "bytes must be PackedByteArray"}
+	var bytes: PackedByteArray = bytes_v as PackedByteArray
+	var expected_len: int = int(entry.get("length", -1))
+	if expected_len != bytes.size():
+		return {"ok": false, "error": "length mismatch before restore"}
+	var expected_sha: String = str(entry.get("sha256", ""))
+	if expected_sha != _sha256_bytes(bytes):
+		return {"ok": false, "error": "sha mismatch before restore"}
 	var dir: String = path.get_base_dir()
 	if not dir.is_empty() and not _ensure_dir(dir):
 		return {"ok": false, "error": "cannot ensure directory"}
-	if not _write_all(path, text):
+	if not _write_all_bytes(path, bytes):
 		return {"ok": false, "error": "write failed"}
 	var verify: Dictionary = _capture_one_artifact(path)
 	if not bool(verify.get("ok", false)):
 		return {"ok": false, "error": "post-write unreadable"}
 	var data: Dictionary = verify.get("data", {}) as Dictionary
-	if str(data.get("sha256", "")) != str(entry.get("sha256", "")):
+	if str(data.get("sha256", "")) != expected_sha:
 		return {"ok": false, "error": "sha mismatch after restore"}
-	if int(data.get("length", -1)) != int(entry.get("length", -2)):
+	if int(data.get("length", -1)) != expected_len:
 		return {"ok": false, "error": "length mismatch after restore"}
+	var got: Variant = data.get("bytes", PackedByteArray())
+	if typeof(got) != TYPE_PACKED_BYTE_ARRAY or got != bytes:
+		return {"ok": false, "error": "bytes mismatch after restore"}
 	return {"ok": true, "error": ""}
-
 
 static func _fail_and_restore(
 	pre_snap: Dictionary,
@@ -435,11 +455,31 @@ static func _read_all(path: String) -> String:
 	return text
 
 
+static func _read_all_bytes(path: String) -> PackedByteArray:
+	if not FileAccess.file_exists(path):
+		return PackedByteArray()
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return PackedByteArray()
+	var expected_len: int = int(f.get_length())
+	var bytes: PackedByteArray = f.get_buffer(expected_len)
+	f.close()
+	if bytes.size() != expected_len:
+		return PackedByteArray()
+	return bytes
+
+
+## UTF-8 profile text writer for public save_text path only.
 static func _write_all(path: String, text: String) -> bool:
+	return _write_all_bytes(path, text.to_utf8_buffer())
+
+
+## Authority raw-byte writer used by artifact snapshot restore and staged copies.
+static func _write_all_bytes(path: String, bytes: PackedByteArray) -> bool:
 	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return false
-	f.store_string(text)
+	f.store_buffer(bytes)
 	f.flush()
 	var err: Error = f.get_error()
 	f.close()
@@ -450,9 +490,10 @@ static func _write_all(path: String, text: String) -> bool:
 	var verify: FileAccess = FileAccess.open(path, FileAccess.READ)
 	if verify == null:
 		return false
-	var got: String = verify.get_as_text()
+	var expected_len: int = int(verify.get_length())
+	var got: PackedByteArray = verify.get_buffer(expected_len)
 	verify.close()
-	return got == text
+	return got == bytes
 
 
 static func _ensure_dir(dir_path: String) -> bool:

@@ -49,8 +49,9 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Only validated primary updates backup; recovery-after-corrupt must preserve legal backup
 - Fail closed when primary/backup are both invalid
 - Corrupt files are not deleted on initialize
-- Login persistence transaction rolls back full artifact snapshots on navigation failure
-- save_text write failures restore full pre-write artifact snapshots
+- Login persistence transaction rolls back full **byte-exact** artifact snapshots on navigation failure
+- save_text write failures restore full pre-write raw-byte artifact snapshots
+- Snapshot authority is PackedByteArray (`get_buffer` / `store_buffer`), not String decode/re-encode
 - Tests: `user://feibao_tests/<case>/` with canonical containment; fingerprint production artifacts instead of requiring them to be absent
 
 ## Git Branch & PR Rules
