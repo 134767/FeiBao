@@ -9,15 +9,24 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (0.4.0) ===")
+	print("=== FeiBao Test Runner (0.5.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
+
+	# Isolate suite from production user://feibao saves.
+	var suite_path: String = "user://feibao_tests/suite_main"
+	var player_data: Node = root.get_node_or_null("PlayerData")
+	if player_data != null:
+		player_data.call("configure_test_storage_path", suite_path)
+		player_data.call("reset_runtime_state_for_tests")
+		player_data.call("cleanup_test_artifacts")
 
 	var suites: PackedStringArray = PackedStringArray([
 		"res://tests/architecture_smoke_test.gd",
 		"res://tests/game_shell_smoke_test.gd",
 		"res://tests/module_navigation_smoke_test.gd",
 		"res://tests/character_catalog_smoke_test.gd",
+		"res://tests/player_profile_save_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
@@ -38,6 +47,13 @@ func _run_tests() -> void:
 		await suite.run_all()
 		total_passed += int(suite.get("passed"))
 		total_failed += int(suite.get("failed"))
+
+	# Restore PlayerData away from production and clean suite artifacts.
+	if player_data != null:
+		player_data.call("configure_test_storage_path", suite_path)
+		player_data.call("cleanup_test_artifacts")
+		player_data.call("clear_test_storage_path")
+		player_data.call("reset_runtime_state_for_tests")
 
 	var summary: String = "TEST SUMMARY: %d passed, %d failed" % [total_passed, total_failed]
 	print(summary)

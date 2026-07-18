@@ -3,9 +3,9 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.4.0** — character catalog foundation (first dedicated module).
+**Current version: 0.5.0** — local player profile save foundation.
 
-Does **not** claim production gameplay systems are complete.
+Does **not** claim production multiplayer, combat, or cloud systems.
 
 ## Version History
 
@@ -14,7 +14,8 @@ Does **not** claim production gameplay systems are complete.
 | 0.1.0 | Architecture foundation |
 | 0.2.0 | GameShell, Boot / Login / Lobby |
 | 0.3.0 | Registry metadata, shared ModuleScreen, module navigation |
-| **0.4.0 (current)** | Dedicated character catalog module + development seed data |
+| 0.4.0 | Dedicated character catalog module + development seeds |
+| **0.5.0 (current)** | Local versioned player profile, staged save, backup recovery |
 
 ## Clean-room Principles
 
@@ -27,32 +28,38 @@ Does **not** claim production gameplay systems are complete.
 
 | Piece | Role |
 |-------|------|
-| AppState | Phase only (`BOOTSTRAP`…`MODULE`) + in-memory player name. **No screen id storage.** |
-| NavigationState | Current screen + history; `go_back_or_fallback()` |
+| AppState | Phase + **session** player name only. **No file I/O.** |
+| PlayerData | Autoload profile owner; codec + SaveFileStore; syncs AppState |
+| PlayerProfile / Codec | Versioned local profile contract (schema 1) |
+| SaveFileStore | Staged recoverable text write under `user://` |
+| NavigationState | Current screen + history |
 | ScreenRegistry | Unified metadata (path/title/kind/fallback) |
-| GameShell | Single ScreenHost child; `configure_screen` hook |
-| ModuleScreen | Shared placeholder frame for five modules |
-| CharacterDefinition / CharacterCatalog | Read-only character data contract + JSON loader |
-| CharacterScreen / CharacterCard | Dedicated 角色 module UI |
+| GameShell | Single ScreenHost child |
+| CharacterCatalog | Read-only character definitions (not ownership) |
 
 ## Screen Flow
 
 ```text
-Bootstrap → GameShell → Boot → Login → Lobby
+Bootstrap → GameShell → Boot (PlayerData.initialize)
+  → Login (prefill name; manual submit) → Lobby
   ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
-  ⇄ CharacterScreen (character catalog)
+  ⇄ CharacterScreen (catalog definitions only)
 ```
 
-## Character Catalog (0.4.0)
+## Local Save (0.5.0)
 
-- JSON schema version `1` (exact integer; `1.0` ok, fractional values rejected), kind `development_seed`.
-- Six informal seed records (not final lore); every record must have `is_development_seed: true`.
-- `sort_order` is a non-negative exact integer (`2.0` ok; `2.7` / `-0.5` rejected).
-- Search / select / detail; native glyph placeholder when `portrait_path` is empty.
-- No ownership, progression, combat stats, or persistence.
+- Paths: `user://feibao/player_profile.json` (+ `.tmp` / `.bak`)
+- Missing save is normal first run (memory default, no boot write).
+- Corrupt primary may recover from backup; both corrupt → safe default, files kept.
+- No auto-login; no cloud; no encryption claims.
 
-See `docs/FEIBAO_0.4.0_CHARACTER_CATALOG.md`.
+See `docs/FEIBAO_0.5.0_LOCAL_PLAYER_SAVE.md`.
+
+## Character Catalog (0.4.0+)
+
+- Definition JSON is separate from player ownership.
+- Default owned id: `feibao_dev` only.
 
 ## Explicit Exclusions
 
-Combat, gacha, shop, currency, stamina, real inventory/farm/party systems, remote backends, Android signing, third-party commercial assets.
+Combat, gacha, shop, cloud accounts, anti-cheat, multi-slot save UI, Android signing, third-party commercial assets.

@@ -1,4 +1,5 @@
-## Minimal application phase + in-memory player name. No disk save.
+## Minimal application phase + in-memory session player name.
+## Persistence is owned by PlayerData (user://); this node does no file I/O.
 ## Current screen id is owned by NavigationState only.
 extends Node
 
