@@ -51,8 +51,12 @@ Version **0.7.0** upgrades the party module from a shared placeholder to a dedic
 - **BodyScroll** (page-level vertical scroll; horizontal disabled) so 360×640 / 390×844 can reach all actions
 - Roster columns: **exactly 2 / 2 / 4** on 360 / 390 / 720 viewports
 - UI remove uses **pending focus** applied during the single `profile_changed` rebuild
-- Remove fallback: next remaining member at the same index, else previous; removing leader → new index 0
+- Remove fallback:
+  1. remaining member at the same index (next slides into the hole),
+  2. else the **previous** remaining member (`provisional[last]`),
+  3. removing leader (index 0) focuses the new index-0 leader
 - Visible slot/roster focus must match internal `_focused_id`
+- BodyScroll vertical range is measured as `vbar.max_value - vbar.page` (360/390 must be > 0.5)
 
 ## Explicit exclusions
 

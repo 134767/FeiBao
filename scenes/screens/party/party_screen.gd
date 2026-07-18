@@ -355,7 +355,10 @@ func _clear_pending_focus_after_party_change() -> void:
 	_pending_focus_after_party_change = &""
 
 
-## Fallback after removing a party member at idx: next remaining, else previous, else new leader.
+## Fallback after removing a party member at remove_index:
+## 1) same index among remaining (next member slides into the hole),
+## 2) otherwise the previous remaining member (tail of provisional),
+## 3) removing leader (index 0) naturally focuses the new index-0 leader.
 func _compute_remove_fallback_focus(removing: StringName, remove_index: int) -> StringName:
 	var provisional: Array[StringName] = []
 	for id in _party_ids:
@@ -365,7 +368,7 @@ func _compute_remove_fallback_focus(removing: StringName, remove_index: int) -> 
 		return &""
 	if remove_index < provisional.size():
 		return provisional[remove_index]
-	return provisional[0]
+	return provisional[provisional.size() - 1]
 
 
 func _refresh_party_ui_preserve_focus() -> void:

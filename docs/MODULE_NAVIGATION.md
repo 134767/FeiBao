@@ -43,7 +43,7 @@ Used by remaining placeholder modules (adventure / inventory / farm / settings):
 - **BodyScroll**: page-level vertical scroll (horizontal disabled) so 360×640 / 390×844 can reach all slots, roster, and action buttons
 - Roster columns: **exactly 2 / 2 / 4** on 360 / 390 / 720 viewports
 - Focus vs leader vs representative remain separate concepts
-- Remove focus fallback: next remaining member, or new leader; visible slot/roster focus matches internal focus
+- Remove focus fallback: same-index remaining member, else previous remaining member; leader remove → new index 0; visible slot/roster focus matches internal focus
 - Full UI refresh only on successful changed `profile_changed` (count=1); failure/no-change = 0
 
 ## GameShell Configure Hook

@@ -681,22 +681,24 @@ func _run_remove_focus_matrix_tests() -> void:
 	# party order may be [feibao_dev, partner_b, partner_a] or similar size 3
 	_assert_eq("rf_restored_size", int(screen.call("get_party_size")), 3)
 
-	# remove tail (last party member)
+	# remove tail (last party member) → exact previous remaining member (not always leader).
 	var party_ids: Array = screen.call("get_party_ids")
+	_assert_true("rf_tail_setup_size", party_ids.size() >= 2)
 	var tail_id: StringName = party_ids[party_ids.size() - 1] as StringName
-	var head_id: StringName = party_ids[0] as StringName
+	var expected_previous_id: StringName = party_ids[party_ids.size() - 2] as StringName
 	_assert_true("rf_tail_focus", bool(screen.call("focus_character_for_test", tail_id)))
 	screen.call("reset_party_refresh_count_for_tests")
 	screen.call("press_remove_for_test")
 	await _tree.process_frame
 	_assert_eq("rf_tail_refresh", int(screen.call("get_party_refresh_count_for_tests")), 1)
 	_assert_eq("rf_tail_size", int(screen.call("get_party_size")), 2)
-	# Removing last index falls back to leader (or remaining member).
 	var after_tail: Array = screen.call("get_party_ids")
-	_assert_true("rf_tail_focus_in_party", after_tail.has(screen.call("get_focused_id")))
-	_assert_eq("rf_tail_slot_vis", str(screen.call("get_focused_slot_character_id")), str(screen.call("get_focused_id")))
-	_assert_eq("rf_tail_roster_vis", str(screen.call("get_focused_roster_character_id")), str(screen.call("get_focused_id")))
 	_assert_true("rf_tail_was_removed", after_tail.has(tail_id) == false)
+	_assert_eq("rf_tail_focus_id", str(screen.call("get_focused_id")), str(expected_previous_id))
+	_assert_eq("rf_tail_slot_vis", str(screen.call("get_focused_slot_character_id")), str(expected_previous_id))
+	_assert_eq("rf_tail_roster_vis", str(screen.call("get_focused_roster_character_id")), str(expected_previous_id))
+	_assert_true("rf_tail_add_disabled", (screen.call("get_add_button") as Button).disabled)
+	_assert_true("rf_tail_rem_enabled", (screen.call("get_remove_button") as Button).disabled == false)
 
 	# rebuild known party for leader remove: ensure [feibao_dev, partner_a, partner_b]
 	while int(screen.call("get_party_size")) > 1:
@@ -780,14 +782,16 @@ func _probe_party_layout(size: Vector2i) -> void:
 	sv.add_child(screen)
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	screen.call("configure_screen", &"party")
-	# Populate roster so multi-column layout is meaningful.
+	# Populate full owned roster so narrow viewports have real vertical overflow.
 	PlayerData.grant_character(&"partner_a")
 	PlayerData.grant_character(&"partner_b")
 	PlayerData.grant_character(&"partner_c")
+	PlayerData.grant_character(&"partner_d")
+	PlayerData.grant_character(&"partner_e")
 	for _i in 5:
 		await _tree.process_frame
 	screen.call("configure_screen", &"party")
-	for _i2 in 3:
+	for _i2 in 4:
 		await _tree.process_frame
 
 	var screen_rect: Rect2 = screen.get_global_rect()
@@ -806,11 +810,33 @@ func _probe_party_layout(size: Vector2i) -> void:
 		"pl_%s_h_scroll_disabled" % tag,
 		body_scroll != null and int(body_scroll.horizontal_scroll_mode) == int(ScrollContainer.SCROLL_MODE_DISABLED)
 	)
-	if body_scroll != null and size.x <= 400:
-		# Narrow viewports must have real vertical scroll range when content overflows.
+
+	# Strict scrollable range: max_value - page (not max_value > 0 alone).
+	var vbar: ScrollBar = null
+	var vmax: float = 0.0
+	var vpage: float = 0.0
+	var vmin: float = 0.0
+	var scrollable_range: float = 0.0
+	var body_content_h: float = 0.0
+	if body_scroll != null:
 		await _tree.process_frame
-		var v_range: int = body_scroll.get_v_scroll_bar().max_value as int if body_scroll.get_v_scroll_bar() != null else 0
-		_assert_true("pl_%s_v_scroll_range" % tag, v_range > 0 or body_scroll.get_v_scroll_bar().max_value > body_scroll.size.y - 1.0)
+		await _tree.process_frame
+		vbar = body_scroll.get_v_scroll_bar()
+		if vbar != null:
+			vmin = float(vbar.min_value)
+			vmax = float(vbar.max_value)
+			vpage = float(vbar.page)
+			scrollable_range = maxf(0.0, vmax - vpage)
+		var body_content: Control = body_scroll.get_child(0) as Control if body_scroll.get_child_count() > 0 else null
+		if body_content != null:
+			body_content_h = body_content.size.y
+		print(
+			"[INFO] scroll_diag_%s vp=%dx%d body_scroll=%.1fx%.1f vmin=%.1f vmax=%.1f page=%.1f range=%.1f content_h=%.1f"
+			% [tag, size.x, size.y, body_scroll.size.x, body_scroll.size.y, vmin, vmax, vpage, scrollable_range, body_content_h]
+		)
+		# 360 and 390 must have real overflow; 720 may fit.
+		if size.x <= 400:
+			_assert_true("pl_%s_v_scrollable_range" % tag, scrollable_range > 0.5)
 
 	var controls: Array = [
 		["back", screen.call("get_back_button"), 48.0],
@@ -889,8 +915,15 @@ func _probe_party_layout(size: Vector2i) -> void:
 				"pl_%s_bottom_actions_visible" % tag,
 				mr.intersects(srect2) and mr.end.y <= srect2.end.y + 4.0 and mr.size.y >= 48.0
 			)
+			print(
+				"[INFO] bottom_diag_%s action_rect=%s body_vp=%s range=%.1f"
+				% [tag, str(mr), str(srect2), scrollable_range]
+			)
 
-	print("[INFO] party_layout_%s cols=%d body_scroll=%s" % [tag, cols, str(body_scroll != null)])
+	print(
+		"[INFO] party_layout_%s cols=%d range=%.1f vmax=%.1f page=%.1f"
+		% [tag, cols, scrollable_range, vmax, vpage]
+	)
 	host.queue_free()
 	await _tree.process_frame
 

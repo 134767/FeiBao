@@ -25,7 +25,7 @@ theme_override_constants/margin_bottom = 16
 
 [node name="RootVBox" type="VBoxContainer" parent="Margin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 10
 
 [node name="HeaderRow" type="HBoxContainer" parent="Margin/RootVBox"]
 layout_mode = 2
@@ -58,7 +58,7 @@ vertical_scroll_mode = 1
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 8
+theme_override_constants/separation = 12
 
 [node name="PartySummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
@@ -77,7 +77,7 @@ autowrap_mode = 3
 [node name="PartySlotsContainer" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 12
 
 [node name="RosterSummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
@@ -112,19 +112,20 @@ columns = 2
 
 [node name="DetailPanel" type="PanelContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 220)
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="DetailMargin" type="MarginContainer" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
+theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_bottom = 12
 
 [node name="DetailVBox" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 10
 
 [node name="DetailNameLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox"]
 unique_name_in_owner = true
