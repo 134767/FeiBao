@@ -523,6 +523,19 @@ func _run_screen_tests() -> void:
 	_assert_eq("adv_vis_area", str(screen.call("get_visible_selected_area_id")), "dev_area_beginner_path")
 	_assert_eq("adv_vis_stage", str(screen.call("get_visible_selected_stage_id")), "dev_stage_beginner_01")
 	_assert_eq("adv_detail_stage", str(screen.call("get_detail_stage_id")), "dev_stage_beginner_01")
+	# Initial selection: internal = visible card = detail (independent storage)
+	_assert_true(
+		"adv_init_cons",
+		_assert_selection_consistent(screen, "dev_stage_beginner_01")
+	)
+	var init_stage_def: StageDefinition = _find_stage_def(&"dev_stage_beginner_01")
+	_assert_true("adv_init_stage_def", init_stage_def != null)
+	if init_stage_def != null:
+		_assert_eq(
+			"adv_detail_display_name_exact",
+			str(screen.call("get_detail_name_text")),
+			init_stage_def.get_display_name()
+		)
 	_assert_true("adv_story", str(screen.call("get_story_intro_text")).find("開發樣本") >= 0)
 	_assert_eq("adv_cards", int(screen.call("get_stage_card_count")), 3)
 	_assert_true("adv_party_sum", str(screen.call("get_party_summary_text")).find("領隊") >= 0)
@@ -541,10 +554,25 @@ func _run_screen_tests() -> void:
 	_assert_eq("adv_area2", str(screen.call("get_selected_area_id")), "dev_area_mist_ridge")
 	_assert_eq("adv_stage_first_of_area", str(screen.call("get_selected_stage_id")), "dev_stage_mist_01")
 	_assert_true("adv_story2", str(screen.call("get_story_intro_text")).find("霧嶺") >= 0)
+	_assert_true(
+		"adv_area_switch_cons",
+		_assert_selection_consistent(screen, "dev_stage_mist_01")
+	)
 	_assert_true("adv_select_stage", bool(screen.call("select_stage_for_test", &"dev_stage_mist_02")))
 	_assert_eq("adv_stage2", str(screen.call("get_selected_stage_id")), "dev_stage_mist_02")
 	_assert_eq("adv_vis_stage2", str(screen.call("get_visible_selected_stage_id")), "dev_stage_mist_02")
 	_assert_eq("adv_detail2", str(screen.call("get_detail_stage_id")), "dev_stage_mist_02")
+	_assert_true(
+		"adv_stage_switch_cons",
+		_assert_selection_consistent(screen, "dev_stage_mist_02")
+	)
+	var mist02_def: StageDefinition = _find_stage_def(&"dev_stage_mist_02")
+	if mist02_def != null:
+		_assert_eq(
+			"adv_detail_name_after_switch",
+			str(screen.call("get_detail_name_text")),
+			mist02_def.get_display_name()
+		)
 
 	screen.call("reset_prepare_refresh_count_for_tests")
 	var sig: Array = [0]
@@ -561,6 +589,11 @@ func _run_screen_tests() -> void:
 	_assert_true("adv_card_prepared", _card_is_prepared(screen, "dev_stage_mist_02"))
 	_assert_true("adv_card_viewing_prep", _card_is_viewing(screen, "dev_stage_mist_02"))
 	_assert_true("adv_card_other_not_viewing", _card_is_viewing(screen, "dev_stage_mist_01") == false)
+	_assert_true(
+		"adv_prepare_cons",
+		_assert_selection_consistent(screen, "dev_stage_mist_02")
+	)
+	_assert_eq("adv_prepare_cons_state", str(AdventureState.get_selected_stage_id()), "dev_stage_mist_02")
 
 	screen.call("reset_prepare_refresh_count_for_tests")
 	var sig_before: int = int(sig[0])
@@ -572,12 +605,36 @@ func _run_screen_tests() -> void:
 	await _tree.process_frame
 	_assert_eq("adv_reconfig_keep_stage", str(screen.call("get_selected_stage_id")), "dev_stage_mist_02")
 
-	# profile_changed updates party summary only once
-	screen.call("reset_party_summary_refresh_count_for_tests")
+	# True leader ≠ representative: party leader stays feibao_dev while rep is partner_a.
+	var leader_before: StringName = PlayerData.get_party_leader_character_id()
+	_assert_eq("adv_leader_before", str(leader_before), "feibao_dev")
 	PlayerData.grant_character(&"partner_a")
+	var sel_res: Dictionary = PlayerData.select_character(&"partner_a")
+	_assert_true("adv_rep_select_ok", bool(sel_res.get("ok", false)))
+	_assert_eq("adv_rep_id", str(PlayerData.get_selected_character_id()), "partner_a")
+	_assert_eq("adv_leader_id", str(PlayerData.get_party_leader_character_id()), "feibao_dev")
+	_assert_true(
+		"adv_leader_rep_diff",
+		str(PlayerData.get_selected_character_id()) != str(PlayerData.get_party_leader_character_id())
+	)
+	var prepared_before_party: String = str(AdventureState.get_selected_stage_id())
+	var stage_before_party: String = str(screen.call("get_selected_stage_id"))
+	screen.call("reset_party_summary_refresh_count_for_tests")
+	# profile_changed already fired on select; force one explicit summary path via reconfigure profile signal
+	# Trigger a single grant-noop-free profile touch: re-select same rep is no-op; use grant of already-owned is no-op.
+	# Refresh count is measured against a deliberate profile_changed after reset:
+	PlayerData.grant_character(&"partner_b")
 	await _tree.process_frame
 	_assert_eq("adv_party_refresh", int(screen.call("get_party_summary_refresh_count_for_tests")), 1)
-	_assert_eq("adv_stage_stable", str(screen.call("get_selected_stage_id")), "dev_stage_mist_02")
+	var leader_display: String = _character_display_name(&"feibao_dev")
+	var rep_display: String = _character_display_name(&"partner_a")
+	var party_text: String = str(screen.call("get_party_summary_text"))
+	var party_size: int = PlayerData.get_active_party_character_ids().size()
+	_assert_true("adv_party_shows_leader_name", party_text.find(leader_display) >= 0)
+	_assert_true("adv_party_not_rep_as_leader", party_text.find(rep_display) < 0)
+	_assert_true("adv_party_size_fmt", party_text.find("目前隊伍 %d 人" % party_size) >= 0)
+	_assert_eq("adv_stage_stable", str(screen.call("get_selected_stage_id")), stage_before_party)
+	_assert_eq("adv_prepared_stable", str(AdventureState.get_selected_stage_id()), prepared_before_party)
 
 	var back: Button = screen.call("get_back_button") as Button
 	_assert_true("adv_back_h", back != null and back.custom_minimum_size.y >= 48.0)
@@ -591,12 +648,49 @@ func _run_screen_tests() -> void:
 	_assert_eq("adv_cons_prepared", str(AdventureState.get_selected_stage_id()), "dev_stage_mist_02")
 	_assert_eq("adv_cards_mist", int(screen.call("get_stage_card_count")), 3)
 
-	# Back navigation with history
+	# A. Real AdventureScreen back with history (no NavigationState bypass).
 	_nav().call("reset", &"lobby")
 	_nav().call("navigate_to", &"adventure", true)
+	_assert_eq("adv_hist_setup_cur", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("adv_hist_setup_size", int(_nav().call("get_history_size")), 1)
+	var hist_sig: Array = [0]
+	var hist_cb := func() -> void:
+		hist_sig[0] = int(hist_sig[0]) + 1
+	screen.back_requested.connect(hist_cb)
+	var back_btn: Button = screen.call("get_back_button") as Button
+	_assert_true("adv_hist_back_btn", back_btn != null)
+	if back_btn != null:
+		back_btn.pressed.emit()
+	else:
+		screen.call("request_back")
 	await _tree.process_frame
-	_assert_true("adv_back_ok", bool(screen.call("request_back") if false else NavigationState.go_back_or_fallback()))
-	# re-instantiate for isolation after free below
+	_assert_eq("adv_hist_final_screen", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("adv_hist_size_after", int(_nav().call("get_history_size")), 0)
+	_assert_eq("adv_hist_sig", int(hist_sig[0]), 1)
+	# No duplicate signal on second emit without new press path setup
+	if screen.back_requested.is_connected(hist_cb):
+		screen.back_requested.disconnect(hist_cb)
+
+	# B. Empty history fallback via AdventureScreen API (ScreenRegistry back_fallback).
+	_nav().call("reset", &"adventure")
+	_assert_eq("adv_fb_setup_cur", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("adv_fb_setup_hist", int(_nav().call("get_history_size")), 0)
+	_assert_eq("adv_fb_registry", str(ScreenRegistry.get_back_fallback(&"adventure")), "lobby")
+	var fb_sig: Array = [0]
+	var fb_cb := func() -> void:
+		fb_sig[0] = int(fb_sig[0]) + 1
+	screen.back_requested.connect(fb_cb)
+	var phase_before: int = int(_app().call("get_phase")) if _app().has_method("get_phase") else -1
+	_assert_true("adv_fb_request_ok", bool(screen.call("request_back")))
+	await _tree.process_frame
+	_assert_eq("adv_fb_final_screen", str(_nav().call("get_current_screen")), "lobby")
+	_assert_eq("adv_fb_hist_still_0", int(_nav().call("get_history_size")), 0)
+	_assert_eq("adv_fb_sig", int(fb_sig[0]), 1)
+	_assert_true("adv_fb_no_quit", _tree != null and is_instance_valid(_tree.root))
+	if phase_before >= 0 and _app().has_method("get_phase"):
+		_assert_true("adv_fb_phase_alive", int(_app().call("get_phase")) >= 0)
+	if screen.back_requested.is_connected(fb_cb):
+		screen.back_requested.disconnect(fb_cb)
 
 	# Double configure then prepare once → signal effect 1
 	var screen2: Control = packed.instantiate() as Control
@@ -628,6 +722,10 @@ func _run_screen_tests() -> void:
 	screen.queue_free()
 	screen2.queue_free()
 	await _tree.process_frame
+
+	# Failure probes (fixture override seams; production catalog/PlayerData untouched).
+	await _run_catalog_failure_probe(packed)
+	await _run_player_data_unavailable_probe(packed)
 	print("[INFO] adventure screen tests passed")
 
 
@@ -711,15 +809,31 @@ func _probe_layout(size: Vector2i) -> void:
 	var back: Button = screen.call("get_back_button") as Button
 	if back != null:
 		var bkr: Rect2 = back.get_global_rect()
-		_assert_true("al_%s_back_h" % tag, back.custom_minimum_size.y >= 48.0 and bkr.size.y >= 48.0)
-	# Area selector touch target
+		_assert_true("al_%s_back_min" % tag, back.custom_minimum_size.y >= 48.0)
+		_assert_true("al_%s_back_h" % tag, bkr.size.y >= 48.0)
+	# Area selector: min height AND actual rect height must both pass (no OR fallback).
 	var area_row: Node = screen.find_child("AreaButtonsRow", true, false)
 	_assert_true("al_%s_area_row" % tag, area_row != null)
 	if area_row != null and area_row.get_child_count() > 0:
-		var ab: Control = area_row.get_child(0) as Control
-		if ab != null:
+		for ai in area_row.get_child_count():
+			var ab: Control = area_row.get_child(ai) as Control
+			if ab == null:
+				continue
+			screen.call("ensure_control_visible_for_test", ab)
+			await _tree.process_frame
 			var abr: Rect2 = ab.get_global_rect()
-			_assert_true("al_%s_area_btn_h" % tag, abr.size.y >= 48.0 or ab.custom_minimum_size.y >= 48.0)
+			_assert_true("al_%s_area%d_min" % [tag, ai], ab.custom_minimum_size.y >= 48.0)
+			_assert_true("al_%s_area%d_h" % [tag, ai], abr.size.y >= 48.0)
+			_assert_true("al_%s_area%d_no_h_overflow_l" % [tag, ai], abr.position.x >= screen_rect.position.x - 2.0)
+			_assert_true("al_%s_area%d_no_h_overflow_r" % [tag, ai], abr.end.x <= screen_rect.end.x + 2.0)
+			if ab is Button:
+				var abtn: Button = ab as Button
+				_assert_true("al_%s_area%d_text" % [tag, ai], not abtn.text.is_empty())
+				_assert_true("al_%s_area%d_no_clip" % [tag, ai], abtn.clip_text == false)
+				_assert_true(
+					"al_%s_area%d_readable" % [tag, ai],
+					abr.size.y >= 48.0 and abtn.get_combined_minimum_size().y <= abr.size.y + 1.0
+				)
 	# No nested vertical ScrollContainer under BodyScroll content
 	var nested_v: int = 0
 	if body != null:
@@ -734,7 +848,7 @@ func _probe_layout(size: Vector2i) -> void:
 		if hb != null:
 			h_range = maxf(0.0, float(hb.max_value) - float(hb.page))
 		_assert_true("al_%s_h_range_zero" % tag, h_range <= 0.5)
-	# Selection consistency on layout instance
+	# Selection consistency on layout instance (detail uses independent storage)
 	_assert_eq("al_%s_sel_area" % tag, str(screen.call("get_selected_area_id")), str(screen.call("get_visible_selected_area_id")))
 	_assert_eq("al_%s_sel_stage" % tag, str(screen.call("get_selected_stage_id")), str(screen.call("get_visible_selected_stage_id")))
 	_assert_eq("al_%s_detail_stage" % tag, str(screen.call("get_detail_stage_id")), str(screen.call("get_selected_stage_id")))
@@ -778,6 +892,121 @@ func _find_stage_card(screen: Control, stage_id: String) -> Object:
 		if child != null and child.has_method("get_stage_id") and str(child.call("get_stage_id")) == stage_id:
 			return child
 	return null
+
+
+func _assert_selection_consistent(screen: Control, expected_stage: String) -> bool:
+	var internal_id: String = str(screen.call("get_selected_stage_id"))
+	var visible_id: String = str(screen.call("get_visible_selected_stage_id"))
+	var detail_id: String = str(screen.call("get_detail_stage_id"))
+	return (
+		internal_id == expected_stage
+		and visible_id == expected_stage
+		and detail_id == expected_stage
+	)
+
+
+func _character_display_name(character_id: StringName) -> String:
+	var cat: Dictionary = CharacterCatalog.load_default()
+	if bool(cat.get("ok", false)):
+		for item in cat.get("characters", []):
+			if item is CharacterDefinition and (item as CharacterDefinition).get_id() == character_id:
+				return (item as CharacterDefinition).get_display_name()
+	return str(character_id)
+
+
+func _find_stage_def(stage_id: StringName) -> StageDefinition:
+	var found: Dictionary = StageCatalog.find_stage(stage_id)
+	if not bool(found.get("ok", false)):
+		return null
+	return found.get("stage") as StageDefinition
+
+
+func _run_catalog_failure_probe(packed: PackedScene) -> void:
+	_begin_case("catalog_fail")
+	PlayerData.initialize()
+	var rev_before: int = PlayerData.get_profile().get_revision()
+	var party_before: int = PlayerData.get_active_party_character_ids().size()
+	AdventureState.reset_runtime_state_for_tests()
+	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	var prepared_before: String = str(AdventureState.get_selected_stage_id())
+	var disk_before: bool = PlayerData.did_last_save_write_disk()
+	_nav().call("reset", &"adventure")
+
+	var screen: Control = packed.instantiate() as Control
+	# Override before enter_tree so auto-configure (if any) uses the fail-closed seam.
+	screen.call(
+		"set_stage_catalog_override_for_tests",
+		{"ok": false, "error": "test forced catalog failure", "areas": [], "stages": []}
+	)
+	_tree.root.add_child(screen)
+	_assert_true("adv_cf_cfg", bool(screen.call("configure_screen", &"adventure")))
+	await _tree.process_frame
+	await _tree.process_frame
+
+	_assert_true("adv_cf_load_ok_false", bool(screen.call("is_load_ok")) == false)
+	_assert_eq("adv_cf_area_empty", str(screen.call("get_selected_area_id")), "")
+	_assert_eq("adv_cf_stage_empty", str(screen.call("get_selected_stage_id")), "")
+	_assert_eq("adv_cf_vis_area_empty", str(screen.call("get_visible_selected_area_id")), "")
+	_assert_eq("adv_cf_vis_stage_empty", str(screen.call("get_visible_selected_stage_id")), "")
+	_assert_eq("adv_cf_detail_empty", str(screen.call("get_detail_stage_id")), "")
+	_assert_true("adv_cf_error_visible", bool(screen.call("is_error_state_visible")))
+	var err_text: String = str(screen.call("get_error_text"))
+	_assert_true("adv_cf_error_msg", not err_text.is_empty())
+	_assert_true(
+		"adv_cf_error_readable",
+		err_text.find("失敗") >= 0 or err_text.find("catalog") >= 0 or err_text.find("failure") >= 0
+	)
+	var prep: Button = screen.call("get_prepare_button") as Button
+	_assert_true("adv_cf_prep_disabled", prep != null and prep.disabled)
+	_assert_eq("adv_cf_state_unchanged", str(AdventureState.get_selected_stage_id()), prepared_before)
+	_assert_eq("adv_cf_rev_unchanged", PlayerData.get_profile().get_revision(), rev_before)
+	_assert_eq("adv_cf_party_unchanged", PlayerData.get_active_party_character_ids().size(), party_before)
+	_assert_eq("adv_cf_disk_flag", PlayerData.did_last_save_write_disk(), disk_before)
+	_assert_eq("adv_cf_nav_still_adv", str(_nav().call("get_current_screen")), "adventure")
+	screen.call("clear_stage_catalog_override_for_tests")
+	screen.queue_free()
+	await _tree.process_frame
+
+
+func _run_player_data_unavailable_probe(packed: PackedScene) -> void:
+	_begin_case("player_data_fail")
+	PlayerData.initialize()
+	AdventureState.reset_runtime_state_for_tests()
+	var prepared_seed: Dictionary = AdventureState.prepare_stage(&"dev_stage_beginner_02")
+	_assert_true("adv_pd_seed_ok", bool(prepared_seed.get("ok", false)))
+	var prepared_before: String = str(AdventureState.get_selected_stage_id())
+	var rev_before: int = PlayerData.get_profile().get_revision()
+	_nav().call("reset", &"adventure")
+
+	var screen: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	_assert_true("adv_pd_cfg", bool(screen.call("configure_screen", &"adventure")))
+	await _tree.process_frame
+	# Override after load so catalog still works; party/prepare paths use the seam.
+	screen.call("set_player_data_available_override_for_tests", false)
+	# Force UI paths that depend on PlayerData seam.
+	screen.call("configure_screen", &"adventure")
+	await _tree.process_frame
+	await _tree.process_frame
+
+	var party_text: String = str(screen.call("get_party_summary_text"))
+	_assert_true("adv_pd_msg", party_text.find("無法讀取隊伍資料") >= 0)
+	var prep: Button = screen.call("get_prepare_button") as Button
+	_assert_true("adv_pd_prep_disabled", prep != null and prep.disabled)
+	# Direct handler call must also fail-safe (not only Button.disabled).
+	screen.call("press_prepare_for_test")
+	await _tree.process_frame
+	_assert_eq("adv_pd_state_unchanged", str(AdventureState.get_selected_stage_id()), prepared_before)
+	_assert_true(
+		"adv_pd_handler_msg",
+		str(screen.call("get_mutation_message")).find("無法讀取隊伍資料") >= 0
+	)
+	_assert_eq("adv_pd_rev_unchanged", PlayerData.get_profile().get_revision(), rev_before)
+	_assert_eq("adv_pd_nav_still", str(_nav().call("get_current_screen")), "adventure")
+	_assert_true("adv_pd_no_quit", is_instance_valid(_tree.root))
+	screen.call("clear_player_data_available_override_for_tests")
+	screen.queue_free()
+	await _tree.process_frame
 
 
 func _assert_true(name: String, cond: bool) -> void:

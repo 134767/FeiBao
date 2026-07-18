@@ -40,12 +40,17 @@ var _player_data_signals_bound: bool = false
 var _areas: Array[StageAreaDefinition] = []
 var _selected_area_id: StringName = &""
 var _selected_stage_id: StringName = &""
+## Independent of selection storage; updated only by _update_detail().
+var _detail_stage_id: StringName = &""
 var _area_buttons: Dictionary = {}
 var _stage_cards: Dictionary = {}
 var _load_ok: bool = false
 var _load_error: String = ""
 var _prepare_refresh_count_for_tests: int = 0
 var _party_summary_refresh_count_for_tests: int = 0
+## Test fixture overrides (null = production path).
+var _stage_catalog_override_for_tests: Variant = null
+var _player_data_available_override_for_tests: Variant = null
 
 
 func _ready() -> void:
@@ -128,7 +133,7 @@ func _reload_all() -> void:
 	_set_mutation_message("")
 	_hide_error()
 
-	var result: Dictionary = StageCatalog.load_default()
+	var result: Dictionary = _load_stage_catalog()
 	_load_ok = bool(result.get("ok", false))
 	_load_error = str(result.get("error", ""))
 	_areas.clear()
@@ -147,6 +152,20 @@ func _reload_all() -> void:
 	_update_party_summary()
 	_update_prepare_button()
 	_refresh_columns()
+
+
+## Overridable dependency seam for StageCatalog (production default unchanged).
+func _load_stage_catalog() -> Dictionary:
+	if _stage_catalog_override_for_tests is Dictionary:
+		return (_stage_catalog_override_for_tests as Dictionary).duplicate(true)
+	return StageCatalog.load_default()
+
+
+## Overridable dependency seam for PlayerData availability.
+func _is_player_data_available() -> bool:
+	if _player_data_available_override_for_tests != null:
+		return bool(_player_data_available_override_for_tests)
+	return is_instance_valid(PlayerData)
 
 
 func _restore_or_default_selection() -> void:
@@ -264,13 +283,22 @@ func _update_detail() -> void:
 	if is_instance_valid(AdventureState):
 		prepared_id = AdventureState.get_selected_stage_id()
 	if stage == null:
+		_detail_stage_id = &""
 		if _detail_name_label != null:
 			_detail_name_label.text = "請選擇關卡"
 		if _detail_summary_label != null:
 			_detail_summary_label.text = ""
 		if _detail_status_label != null:
 			_detail_status_label.text = ""
+		for id in _stage_cards.keys():
+			var empty_card: Object = _stage_cards[id]
+			if empty_card != null and is_instance_valid(empty_card):
+				if empty_card.has_method("set_viewing"):
+					empty_card.call("set_viewing", false)
+				if empty_card.has_method("set_prepared"):
+					empty_card.call("set_prepared", id == prepared_id)
 		return
+	_detail_stage_id = stage.get_id()
 	if _detail_name_label != null:
 		_detail_name_label.text = stage.get_display_name()
 	if _detail_summary_label != null:
@@ -295,7 +323,7 @@ func _update_party_summary() -> void:
 	_party_summary_refresh_count_for_tests += 1
 	if _party_summary_label == null:
 		return
-	if not is_instance_valid(PlayerData):
+	if not _is_player_data_available():
 		_party_summary_label.text = MSG_NO_PARTY
 		return
 	if not PlayerData.is_initialized():
@@ -318,7 +346,7 @@ func _update_prepare_button() -> void:
 	var ok: bool = (
 		_load_ok
 		and not String(_selected_stage_id).is_empty()
-		and is_instance_valid(PlayerData)
+		and _is_player_data_available()
 		and is_instance_valid(AdventureState)
 	)
 	_prepare_button.disabled = not ok
@@ -350,6 +378,13 @@ func _on_stage_card_activated(stage_id: StringName) -> void:
 
 
 func _on_prepare_pressed() -> void:
+	# Handler is fail-safe even when Button.disabled is bypassed by tests/callers.
+	if not _is_player_data_available():
+		_set_mutation_message(MSG_NO_PARTY)
+		return
+	if not _load_ok or String(_selected_stage_id).is_empty():
+		_set_mutation_message(MSG_PREPARE_FAIL)
+		return
 	if not is_instance_valid(AdventureState):
 		_set_mutation_message(MSG_PREPARE_FAIL)
 		return
@@ -474,13 +509,23 @@ func get_visible_selected_stage_id() -> StringName:
 
 
 func get_detail_stage_id() -> StringName:
-	return _selected_stage_id
+	return _detail_stage_id
 
 
 func get_detail_name_text() -> String:
 	if _detail_name_label == null:
 		return ""
 	return _detail_name_label.text
+
+
+func is_error_state_visible() -> bool:
+	return _error_label != null and _error_label.visible
+
+
+func get_error_text() -> String:
+	if _error_label == null:
+		return ""
+	return _error_label.text
 
 
 func get_story_intro_text() -> String:
@@ -547,6 +592,22 @@ func reset_party_summary_refresh_count_for_tests() -> void:
 
 func get_party_summary_refresh_count_for_tests() -> int:
 	return _party_summary_refresh_count_for_tests
+
+
+func set_stage_catalog_override_for_tests(result: Dictionary) -> void:
+	_stage_catalog_override_for_tests = result.duplicate(true)
+
+
+func clear_stage_catalog_override_for_tests() -> void:
+	_stage_catalog_override_for_tests = null
+
+
+func set_player_data_available_override_for_tests(available: bool) -> void:
+	_player_data_available_override_for_tests = available
+
+
+func clear_player_data_available_override_for_tests() -> void:
+	_player_data_available_override_for_tests = null
 
 
 func ensure_control_visible_for_test(control: Control) -> void:
