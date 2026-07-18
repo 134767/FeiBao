@@ -638,7 +638,121 @@ func _run_party_screen_tests() -> void:
 
 	screen.queue_free()
 	await _tree.process_frame
+
+	# Dedicated remove middle / tail / leader focus consistency suite.
+	await _run_remove_focus_matrix_tests()
 	print("[INFO] party screen tests passed")
+
+
+func _run_remove_focus_matrix_tests() -> void:
+	_begin_case("remove_focus_matrix")
+	PlayerData.initialize()
+	PlayerData.grant_character(&"partner_a")
+	PlayerData.grant_character(&"partner_b")
+	PlayerData.add_party_member(&"partner_a")
+	PlayerData.add_party_member(&"partner_b")
+	# party: [feibao_dev, partner_a, partner_b]
+	var packed: PackedScene = load("res://scenes/screens/party/party_screen.tscn") as PackedScene
+	var screen: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	screen.call("configure_screen", &"party")
+	await _tree.process_frame
+	await _tree.process_frame
+	_assert_eq("rf_party3", int(screen.call("get_party_size")), 3)
+
+	# remove middle partner_a → focus partner_b
+	_assert_true("rf_mid_focus", bool(screen.call("focus_character_for_test", &"partner_a")))
+	screen.call("reset_party_refresh_count_for_tests")
+	screen.call("press_remove_for_test")
+	await _tree.process_frame
+	_assert_eq("rf_mid_refresh", int(screen.call("get_party_refresh_count_for_tests")), 1)
+	_assert_eq("rf_mid_party", int(screen.call("get_party_size")), 2)
+	_assert_eq("rf_mid_focus_id", str(screen.call("get_focused_id")), "partner_b")
+	_assert_eq("rf_mid_slot_vis", str(screen.call("get_focused_slot_character_id")), "partner_b")
+	_assert_eq("rf_mid_roster_vis", str(screen.call("get_focused_roster_character_id")), "partner_b")
+	_assert_true("rf_mid_detail", str(screen.call("get_detail_name_text")).find("夥伴") >= 0 or str(screen.call("get_detail_name_text")).length() > 0)
+	_assert_true("rf_mid_add_disabled", (screen.call("get_add_button") as Button).disabled)
+	_assert_true("rf_mid_rem_enabled", (screen.call("get_remove_button") as Button).disabled == false)
+
+	# restore 3 for leader remove: add partner_a back
+	screen.call("focus_character_for_test", &"partner_a")
+	screen.call("press_add_for_test")
+	await _tree.process_frame
+	# party order may be [feibao_dev, partner_b, partner_a] or similar size 3
+	_assert_eq("rf_restored_size", int(screen.call("get_party_size")), 3)
+
+	# remove tail (last party member)
+	var party_ids: Array = screen.call("get_party_ids")
+	var tail_id: StringName = party_ids[party_ids.size() - 1] as StringName
+	var head_id: StringName = party_ids[0] as StringName
+	_assert_true("rf_tail_focus", bool(screen.call("focus_character_for_test", tail_id)))
+	screen.call("reset_party_refresh_count_for_tests")
+	screen.call("press_remove_for_test")
+	await _tree.process_frame
+	_assert_eq("rf_tail_refresh", int(screen.call("get_party_refresh_count_for_tests")), 1)
+	_assert_eq("rf_tail_size", int(screen.call("get_party_size")), 2)
+	# Removing last index falls back to leader (or remaining member).
+	var after_tail: Array = screen.call("get_party_ids")
+	_assert_true("rf_tail_focus_in_party", after_tail.has(screen.call("get_focused_id")))
+	_assert_eq("rf_tail_slot_vis", str(screen.call("get_focused_slot_character_id")), str(screen.call("get_focused_id")))
+	_assert_eq("rf_tail_roster_vis", str(screen.call("get_focused_roster_character_id")), str(screen.call("get_focused_id")))
+	_assert_true("rf_tail_was_removed", after_tail.has(tail_id) == false)
+
+	# rebuild known party for leader remove: ensure [feibao_dev, partner_a, partner_b]
+	while int(screen.call("get_party_size")) > 1:
+		var cur: Array = screen.call("get_party_ids")
+		var rem_id: StringName = cur[cur.size() - 1] as StringName
+		if rem_id == &"feibao_dev":
+			break
+		screen.call("focus_character_for_test", rem_id)
+		screen.call("press_remove_for_test")
+		await _tree.process_frame
+	# Now only leader left; re-add a and b
+	if not PlayerData.is_character_in_active_party(&"partner_a"):
+		screen.call("focus_character_for_test", &"partner_a")
+		screen.call("press_add_for_test")
+		await _tree.process_frame
+	if not PlayerData.is_character_in_active_party(&"partner_b"):
+		screen.call("focus_character_for_test", &"partner_b")
+		screen.call("press_add_for_test")
+		await _tree.process_frame
+	# Ensure leader is feibao_dev at 0
+	if str(screen.call("get_leader_id")) != "feibao_dev":
+		# move feibao to 0 via domain
+		PlayerData.move_party_member(&"feibao_dev", 0)
+		await _tree.process_frame
+	_assert_eq("rf_leader_setup", str(screen.call("get_leader_id")), "feibao_dev")
+	_assert_eq("rf_leader_size3", int(screen.call("get_party_size")), 3)
+
+	_assert_true("rf_leader_focus", bool(screen.call("focus_character_for_test", &"feibao_dev")))
+	screen.call("reset_party_refresh_count_for_tests")
+	screen.call("press_remove_for_test")
+	await _tree.process_frame
+	_assert_eq("rf_leader_refresh", int(screen.call("get_party_refresh_count_for_tests")), 1)
+	_assert_eq("rf_leader_new", str(screen.call("get_leader_id")), "partner_a")
+	_assert_eq("rf_leader_focus_id", str(screen.call("get_focused_id")), "partner_a")
+	_assert_eq("rf_leader_slot_vis", str(screen.call("get_focused_slot_character_id")), "partner_a")
+	_assert_eq("rf_leader_roster_vis", str(screen.call("get_focused_roster_character_id")), "partner_a")
+
+	# save failure preserves focus + UI
+	var focus_bf: String = str(screen.call("get_focused_id"))
+	var detail_bf: String = str(screen.call("get_detail_name_text"))
+	var size_bf: int = int(screen.call("get_party_size"))
+	PlayerData.set_save_override_for_tests(func(_p: String, _t: String) -> Dictionary:
+		return {"ok": false, "error": "forced"}
+	)
+	screen.call("reset_party_refresh_count_for_tests")
+	screen.call("press_remove_for_test")
+	_assert_eq("rf_fail_refresh", int(screen.call("get_party_refresh_count_for_tests")), 0)
+	_assert_eq("rf_fail_focus", str(screen.call("get_focused_id")), focus_bf)
+	_assert_eq("rf_fail_size", int(screen.call("get_party_size")), size_bf)
+	_assert_eq("rf_fail_detail", str(screen.call("get_detail_name_text")), detail_bf)
+	_assert_true("rf_fail_msg", str(screen.call("get_mutation_message")).find("無法儲存") >= 0)
+	PlayerData.clear_save_override_for_tests()
+
+	screen.queue_free()
+	await _tree.process_frame
+	print("[INFO] remove focus matrix passed")
 
 
 func _run_party_layout_tests() -> void:
@@ -686,8 +800,17 @@ func _probe_party_layout(size: Vector2i) -> void:
 	if size.x >= 700:
 		_assert_eq("pl_%s_cols" % tag, cols, 4)
 
-	var page_scroll: ScrollContainer = screen.call("get_page_scroll") as ScrollContainer
-	_assert_true("pl_%s_page_scroll" % tag, page_scroll != null)
+	var body_scroll: ScrollContainer = screen.call("get_body_scroll") as ScrollContainer
+	_assert_true("pl_%s_body_scroll" % tag, body_scroll != null)
+	_assert_true(
+		"pl_%s_h_scroll_disabled" % tag,
+		body_scroll != null and int(body_scroll.horizontal_scroll_mode) == int(ScrollContainer.SCROLL_MODE_DISABLED)
+	)
+	if body_scroll != null and size.x <= 400:
+		# Narrow viewports must have real vertical scroll range when content overflows.
+		await _tree.process_frame
+		var v_range: int = body_scroll.get_v_scroll_bar().max_value as int if body_scroll.get_v_scroll_bar() != null else 0
+		_assert_true("pl_%s_v_scroll_range" % tag, v_range > 0 or body_scroll.get_v_scroll_bar().max_value > body_scroll.size.y - 1.0)
 
 	var controls: Array = [
 		["back", screen.call("get_back_button"), 48.0],
@@ -704,12 +827,18 @@ func _probe_party_layout(size: Vector2i) -> void:
 		if btn == null:
 			continue
 		_assert_true("pl_%s_%s_min" % [tag, key], btn.custom_minimum_size.y >= min_h)
-		# Ensure reachable via page scroll, then measure actual rect height.
+		# Ensure reachable via BodyScroll, then measure actual rect height + viewport intersection.
 		screen.call("ensure_control_visible_for_test", btn)
 		await _tree.process_frame
 		var br: Rect2 = btn.get_global_rect()
 		_assert_true("pl_%s_%s_actual_h" % [tag, key], br.size.y >= min_h)
 		_assert_true("pl_%s_%s_no_h_overflow" % [tag, key], br.end.x <= screen_rect.end.x + 2.0)
+		if body_scroll != null and key != "back":
+			var srect: Rect2 = body_scroll.get_global_rect()
+			_assert_true(
+				"pl_%s_%s_in_body_viewport" % [tag, key],
+				br.intersects(srect) and br.position.y + 1.0 >= srect.position.y - 2.0 and br.end.y <= srect.end.y + 4.0
+			)
 
 	var slots: Container = screen.call("get_party_slots_container") as Container
 	_assert_true("pl_%s_slots" % tag, slots != null and slots.get_child_count() == 3)
@@ -737,19 +866,31 @@ func _probe_party_layout(size: Vector2i) -> void:
 			_assert_true("pl_%s_roster_card_h" % tag, card.custom_minimum_size.y >= 72.0 and cr.size.y >= 72.0)
 			_assert_true("pl_%s_roster_card_no_h_overflow" % tag, cr.end.x <= screen_rect.end.x + 2.0)
 
-	# Reachability: after scrolling to actions, detail panel bottom is within page content.
+	# Reachability: detail + bottom actions fully inside BodyScroll viewport after ensure_visible.
 	var detail: PanelContainer = screen.call("get_detail_panel") as PanelContainer
-	if detail != null and page_scroll != null:
+	if detail != null and body_scroll != null:
 		screen.call("ensure_control_visible_for_test", detail)
 		await _tree.process_frame
 		var dr: Rect2 = detail.get_global_rect()
 		_assert_true("pl_%s_detail_no_h_overflow" % tag, dr.end.x <= screen_rect.end.x + 3.0)
-		# Vertical reachability: control intersects scroll viewport after ensure_visible.
-		var scroll_rect: Rect2 = page_scroll.get_global_rect()
-		var intersects: bool = dr.intersects(scroll_rect) or absf(dr.position.y - scroll_rect.position.y) < scroll_rect.size.y + 4.0
-		_assert_true("pl_%s_detail_reachable" % tag, intersects)
+		var scroll_rect: Rect2 = body_scroll.get_global_rect()
+		_assert_true("pl_%s_detail_reachable" % tag, dr.intersects(scroll_rect))
+		# Scroll to absolute bottom: last action row must remain fully visible.
+		if body_scroll.get_v_scroll_bar() != null:
+			body_scroll.scroll_vertical = int(body_scroll.get_v_scroll_bar().max_value)
+			await _tree.process_frame
+		var move_r: Button = screen.call("get_move_right_button") as Button
+		if move_r != null:
+			screen.call("ensure_control_visible_for_test", move_r)
+			await _tree.process_frame
+			var mr: Rect2 = move_r.get_global_rect()
+			var srect2: Rect2 = body_scroll.get_global_rect()
+			_assert_true(
+				"pl_%s_bottom_actions_visible" % tag,
+				mr.intersects(srect2) and mr.end.y <= srect2.end.y + 4.0 and mr.size.y >= 48.0
+			)
 
-	print("[INFO] party_layout_%s cols=%d scroll=%s" % [tag, cols, str(page_scroll != null)])
+	print("[INFO] party_layout_%s cols=%d body_scroll=%s" % [tag, cols, str(body_scroll != null)])
 	host.queue_free()
 	await _tree.process_frame
 

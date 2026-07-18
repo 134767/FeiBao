@@ -78,6 +78,10 @@ func is_empty() -> bool:
 	return _empty
 
 
+func is_focused() -> bool:
+	return _focused
+
+
 func is_leader() -> bool:
 	return not _empty and _slot_index == 0
 

@@ -46,7 +46,7 @@ text = "隊伍編成"
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="PageScroll" type="ScrollContainer" parent="Margin/RootVBox"]
+[node name="BodyScroll" type="ScrollContainer" parent="Margin/RootVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
@@ -54,39 +54,39 @@ size_flags_horizontal = 3
 horizontal_scroll_mode = 0
 vertical_scroll_mode = 1
 
-[node name="PageContent" type="VBoxContainer" parent="Margin/RootVBox/PageScroll"]
+[node name="BodyContent" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="PartySummaryLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="PartySummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "隊伍 1 / 3"
 autowrap_mode = 3
 
-[node name="LeaderSummaryLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="LeaderSummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "領隊：—"
 autowrap_mode = 3
 
-[node name="PartySlotsContainer" type="VBoxContainer" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="PartySlotsContainer" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="RosterSummaryLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="RosterSummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "可用角色 0"
 autowrap_mode = 3
 
-[node name="EmptyRosterLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="EmptyRosterLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -94,7 +94,7 @@ theme_override_font_sizes/font_size = 14
 text = "尚無可用角色"
 autowrap_mode = 3
 
-[node name="ErrorLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="ErrorLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -102,7 +102,7 @@ theme_override_font_sizes/font_size = 14
 text = ""
 autowrap_mode = 3
 
-[node name="RosterGrid" type="GridContainer" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="RosterGrid" type="GridContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -110,71 +110,71 @@ theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 8
 columns = 2
 
-[node name="DetailPanel" type="PanelContainer" parent="Margin/RootVBox/PageScroll/PageContent"]
+[node name="DetailPanel" type="PanelContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="DetailMargin" type="MarginContainer" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel"]
+[node name="DetailMargin" type="MarginContainer" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 10
 
-[node name="DetailVBox" type="VBoxContainer" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin"]
+[node name="DetailVBox" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DetailNameLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox"]
+[node name="DetailNameLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "請選擇角色"
 autowrap_mode = 3
 
-[node name="DetailStatusLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox"]
+[node name="DetailStatusLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = ""
 autowrap_mode = 3
 
-[node name="ActionGrid" type="GridContainer" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox"]
+[node name="ActionGrid" type="GridContainer" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox"]
 layout_mode = 2
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 8
 columns = 2
 
-[node name="AddButton" type="Button" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
+[node name="AddButton" type="Button" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "加入隊伍"
 
-[node name="RemoveButton" type="Button" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
+[node name="RemoveButton" type="Button" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "移出隊伍"
 
-[node name="MoveLeftButton" type="Button" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
+[node name="MoveLeftButton" type="Button" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "左移"
 
-[node name="MoveRightButton" type="Button" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
+[node name="MoveRightButton" type="Button" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox/ActionGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "右移"
 
-[node name="MutationMessageLabel" type="Label" parent="Margin/RootVBox/PageScroll/PageContent/DetailPanel/DetailMargin/DetailVBox"]
+[node name="MutationMessageLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent/DetailPanel/DetailMargin/DetailVBox"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2

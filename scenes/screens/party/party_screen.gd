@@ -23,8 +23,8 @@ const ROSTER_WIDE_MIN_WIDTH: float = 600.0
 
 @onready var _title_label: Label = %TitleLabel
 @onready var _back_button: Button = %BackButton
-@onready var _page_scroll: ScrollContainer = %PageScroll
-@onready var _page_content: Control = %PageContent
+@onready var _body_scroll: ScrollContainer = %BodyScroll
+@onready var _body_content: Control = %BodyContent
 @onready var _party_summary_label: Label = %PartySummaryLabel
 @onready var _leader_summary_label: Label = %LeaderSummaryLabel
 @onready var _party_slots_container: Container = %PartySlotsContainer
@@ -57,6 +57,9 @@ var _load_error: String = ""
 var _slot_nodes: Array = []
 var _roster_cards: Dictionary = {}
 var _party_refresh_count_for_tests: int = 0
+## Pending focus applied once on the next profile_changed full refresh.
+var _has_pending_focus_after_party_change: bool = false
+var _pending_focus_after_party_change: StringName = &""
 
 
 func _ready() -> void:
@@ -342,16 +345,47 @@ func _maybe_show_migration_hint() -> void:
 			_set_mutation_message(MSG_MIGRATION_HINT)
 
 
+func _set_pending_focus_after_party_change(character_id: StringName) -> void:
+	_has_pending_focus_after_party_change = true
+	_pending_focus_after_party_change = character_id
+
+
+func _clear_pending_focus_after_party_change() -> void:
+	_has_pending_focus_after_party_change = false
+	_pending_focus_after_party_change = &""
+
+
+## Fallback after removing a party member at idx: next remaining, else previous, else new leader.
+func _compute_remove_fallback_focus(removing: StringName, remove_index: int) -> StringName:
+	var provisional: Array[StringName] = []
+	for id in _party_ids:
+		if id != removing:
+			provisional.append(id)
+	if provisional.is_empty():
+		return &""
+	if remove_index < provisional.size():
+		return provisional[remove_index]
+	return provisional[0]
+
+
 func _refresh_party_ui_preserve_focus() -> void:
 	_party_refresh_count_for_tests += 1
-	var keep: StringName = _focused_id
 	_sync_from_player_data()
-	if _party_ids.has(keep) or _owned_ids.has(str(keep)):
-		_focused_id = keep
-	elif not _party_ids.is_empty():
-		_focused_id = _party_ids[0]
+	if _has_pending_focus_after_party_change:
+		_focused_id = _pending_focus_after_party_change
+		_clear_pending_focus_after_party_change()
 	else:
-		_focused_id = _pick_initial_focus()
+		var keep: StringName = _focused_id
+		if _party_ids.has(keep) or _owned_ids.has(str(keep)):
+			_focused_id = keep
+		elif not _party_ids.is_empty():
+			_focused_id = _party_ids[0]
+		else:
+			_focused_id = _pick_initial_focus()
+	# Defensive: pending focus must still exist in party or owned after mutation.
+	if not String(_focused_id).is_empty():
+		if not _party_ids.has(_focused_id) and not _owned_ids.has(str(_focused_id)):
+			_focused_id = _party_ids[0] if not _party_ids.is_empty() else _pick_initial_focus()
 	_rebuild_slots()
 	_rebuild_roster()
 	_update_summaries()
@@ -413,39 +447,22 @@ func _on_remove_pressed() -> void:
 		return
 	var removing: StringName = _focused_id
 	var idx: int = _party_ids.find(removing)
-	# Pre-select fallback focus BEFORE mutation so the single profile_changed
-	# rebuild highlights the surviving party member (not the removed roster card).
-	var prior_focus: StringName = _focused_id
+	# Preferred: pending focus applied inside the single profile_changed refresh.
 	if idx >= 0 and _party_ids.size() > 1:
-		var provisional: Array[StringName] = []
-		for id in _party_ids:
-			if id != removing:
-				provisional.append(id)
-		if idx < provisional.size():
-			_focused_id = provisional[idx]
-		elif not provisional.is_empty():
-			_focused_id = provisional[0]
+		_set_pending_focus_after_party_change(_compute_remove_fallback_focus(removing, idx))
 	var result: Dictionary = PlayerData.remove_party_member(removing)
 	if not bool(result.get("ok", false)):
-		_focused_id = prior_focus
+		_clear_pending_focus_after_party_change()
 		_set_mutation_message(MSG_SAVE_FAIL)
-		# No full rebuild on failure; keep badges as-is.
+		# Failure: no signal, no full rebuild; focus and party UI unchanged.
 		return
 	if bool(result.get("changed", false)):
-		# Align with authoritative post-save party (defensive; should match provisional).
-		var next_ids: Array = result.get("active_party_character_ids", []) as Array
-		var still_valid: bool = false
-		for item in next_ids:
-			if item == _focused_id:
-				still_valid = true
-				break
-		if not still_valid and not next_ids.is_empty():
-			_focused_id = next_ids[0] as StringName
-			# Light focus-only sync if provisional missed; does not rebuild tree again.
-			_sync_focus_visuals()
-			_update_detail_and_actions()
+		# Pending already applied during profile_changed; ensure clear.
+		_clear_pending_focus_after_party_change()
 		_set_mutation_message(MSG_REMOVED)
 		party_member_removed.emit(removing)
+	else:
+		_clear_pending_focus_after_party_change()
 
 
 func _on_move_left_pressed() -> void:
@@ -502,10 +519,10 @@ func _refresh_columns() -> void:
 		return
 	# Strict contract: narrow phones 2 columns; design-width (720) → exactly 4.
 	var width: float = size.x
-	if width <= 1.0 and _page_content != null:
-		width = _page_content.size.x
-	if width <= 1.0 and _page_scroll != null:
-		width = _page_scroll.size.x
+	if width <= 1.0 and _body_content != null:
+		width = _body_content.size.x
+	if width <= 1.0 and _body_scroll != null:
+		width = _body_scroll.size.x
 	var cols: int = 2
 	if width >= ROSTER_WIDE_MIN_WIDTH:
 		cols = 4
@@ -607,8 +624,13 @@ func get_party_slots_container() -> Container:
 	return _party_slots_container
 
 
+func get_body_scroll() -> ScrollContainer:
+	return _body_scroll
+
+
+## Backward-compatible alias.
 func get_page_scroll() -> ScrollContainer:
-	return _page_scroll
+	return _body_scroll
 
 
 func get_detail_panel() -> PanelContainer:
@@ -621,20 +643,42 @@ func get_grid_columns() -> int:
 	return _roster_grid.columns
 
 
-## Scroll the page so target is visible (for narrow-viewport reachability).
+## Visible focus: which party slot currently shows focused state.
+func get_focused_slot_character_id() -> StringName:
+	for slot in _slot_nodes:
+		if slot == null or not is_instance_valid(slot):
+			continue
+		if not slot.has_method("is_focused") or not bool(slot.call("is_focused")):
+			continue
+		if slot.has_method("is_empty") and bool(slot.call("is_empty")):
+			continue
+		return slot.call("get_character_id") as StringName
+	return &""
+
+
+## Visible focus: which roster card currently shows focused state.
+func get_focused_roster_character_id() -> StringName:
+	for id in _roster_cards.keys():
+		var card: Object = _roster_cards[id]
+		if card != null and is_instance_valid(card) and card.has_method("is_focused"):
+			if bool(card.call("is_focused")):
+				return id as StringName
+	return &""
+
+
+## Scroll BodyScroll so target is fully reachable (narrow-viewport tests).
 func ensure_control_visible_for_test(control: Control) -> void:
-	if _page_scroll == null or control == null or not is_instance_valid(control):
+	if _body_scroll == null or control == null or not is_instance_valid(control):
 		return
-	# Prefer ensure_control_visible when available (Godot 4 ScrollContainer).
-	if _page_scroll.has_method("ensure_control_visible"):
-		_page_scroll.ensure_control_visible(control)
+	if _body_scroll.has_method("ensure_control_visible"):
+		_body_scroll.ensure_control_visible(control)
 		return
-	var content: Control = _page_content
+	var content: Control = _body_content
 	if content == null:
 		return
 	var local_y: float = control.get_global_rect().position.y - content.get_global_rect().position.y
-	var max_scroll: int = int(maxi(0.0, content.size.y - _page_scroll.size.y))
-	_page_scroll.scroll_vertical = clampi(int(local_y - 8.0), 0, max_scroll)
+	var max_scroll: int = int(maxi(0.0, content.size.y - _body_scroll.size.y))
+	_body_scroll.scroll_vertical = clampi(int(local_y - 8.0), 0, max_scroll)
 
 
 func reset_party_refresh_count_for_tests() -> void:
