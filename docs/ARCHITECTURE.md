@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.3.0** — module navigation foundation (Lobby → six modules → back/fallback).
+**Current version: 0.4.0** — character catalog foundation (first dedicated module).
 
 Does **not** claim production gameplay systems are complete.
 
@@ -13,13 +13,15 @@ Does **not** claim production gameplay systems are complete.
 |---------|-----------|
 | 0.1.0 | Architecture foundation |
 | 0.2.0 | GameShell, Boot / Login / Lobby |
-| **0.3.0 (current)** | Registry metadata, shared ModuleScreen, module navigation |
+| 0.3.0 | Registry metadata, shared ModuleScreen, module navigation |
+| **0.4.0 (current)** | Dedicated character catalog module + development seed data |
 
 ## Clean-room Principles
 
 - Original code and UI only.
 - No APK / decompiled / proprietary commercial content.
 - No secrets or signing keys in-repo.
+- No marketplace art/fonts/audio/plugins without Cloud Director review.
 
 ## Key Components
 
@@ -29,14 +31,28 @@ Does **not** claim production gameplay systems are complete.
 | NavigationState | Current screen + history; `go_back_or_fallback()` |
 | ScreenRegistry | Unified metadata (path/title/kind/fallback) |
 | GameShell | Single ScreenHost child; `configure_screen` hook |
-| ModuleScreen | Shared module frame |
+| ModuleScreen | Shared placeholder frame for five modules |
+| CharacterDefinition / CharacterCatalog | Read-only character data contract + JSON loader |
+| CharacterScreen / CharacterCard | Dedicated 角色 module UI |
 
 ## Screen Flow
 
 ```text
-Bootstrap → GameShell → Boot → Login → Lobby ⇄ ModuleScreen (×6 ids)
+Bootstrap → GameShell → Boot → Login → Lobby
+  ⇄ ModuleScreen (adventure, party, inventory, farm, settings)
+  ⇄ CharacterScreen (character catalog)
 ```
+
+## Character Catalog (0.4.0)
+
+- JSON schema version `1` (exact integer; `1.0` ok, fractional values rejected), kind `development_seed`.
+- Six informal seed records (not final lore); every record must have `is_development_seed: true`.
+- `sort_order` is a non-negative exact integer (`2.0` ok; `2.7` / `-0.5` rejected).
+- Search / select / detail; native glyph placeholder when `portrait_path` is empty.
+- No ownership, progression, combat stats, or persistence.
+
+See `docs/FEIBAO_0.4.0_CHARACTER_CATALOG.md`.
 
 ## Explicit Exclusions
 
-Combat, gacha, shop, currency, stamina, real inventory/farm/party/character data, remote backends, Android signing.
+Combat, gacha, shop, currency, stamina, real inventory/farm/party systems, remote backends, Android signing, third-party commercial assets.
