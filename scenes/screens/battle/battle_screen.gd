@@ -41,6 +41,8 @@ var _ready_done: bool = false
 var _signals_bound: bool = false
 var _session_signals_bound: bool = false
 var _session_ok: bool = false
+## Transaction lock for leave: set before clear/nav; held until exit on success; unlocked on nav failure.
+var _leave_in_progress: bool = false
 var _leave_count_for_tests: int = 0
 var _leave_nav_result_override_for_tests: Variant = null
 
@@ -58,6 +60,8 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_unbind_session_signals()
+	# Instance-local cleanup only — do not touch BattleState, navigate, or emit leave signals.
+	_leave_in_progress = false
 
 
 func _bind_signals() -> void:
@@ -87,6 +91,7 @@ func _unbind_session_signals() -> void:
 func configure_screen(screen_id: StringName) -> bool:
 	if screen_id != ScreenRegistry.SCREEN_BATTLE:
 		return false
+	# Never clear an in-flight leave transaction — reconfigure must not unlock the guard.
 	_screen_id = screen_id
 	_configured = true
 	AppState.set_phase(AppState.Phase.MODULE)
@@ -121,8 +126,7 @@ func _apply_session_ui() -> void:
 	if not _session_ok:
 		_clear_content_labels()
 		_show_error(MSG_NO_SESSION)
-		if _leave_button != null:
-			_leave_button.disabled = false
+		_sync_leave_controls()
 		return
 
 	var party_ids: Array[StringName] = BattleState.get_party_character_ids()
@@ -132,8 +136,7 @@ func _apply_session_ui() -> void:
 		_clear_content_labels()
 		_show_error(str(name_result.get("error", MSG_CHAR_MISSING)))
 		_session_ok = false
-		if _leave_button != null:
-			_leave_button.disabled = false
+		_sync_leave_controls()
 		return
 
 	_hide_error()
@@ -166,8 +169,16 @@ func _apply_session_ui() -> void:
 			var mark: String = LEADER_MARK if party_ids[i] == leader_id else ""
 			lines.append(PARTY_LINE_FMT % [i + 1, nm, mark])
 		_party_list_label.text = "\n".join(lines)
+	_sync_leave_controls()
+
+
+## Keep leave/back controls disabled while a leave transaction is in progress.
+func _sync_leave_controls() -> void:
+	var enabled: bool = not _leave_in_progress
+	if _back_button != null:
+		_back_button.disabled = not enabled
 	if _leave_button != null:
-		_leave_button.disabled = false
+		_leave_button.disabled = not enabled
 
 
 func _clear_content_labels() -> void:
@@ -222,11 +233,27 @@ func _on_leave_pressed() -> void:
 	request_leave()
 
 
-## Transaction: snapshot → clear → navigate; restore session if navigation fails.
+## Transaction: re-entrancy guard → snapshot → clear → navigate; restore session if navigation fails.
+## Successful leave keeps the lock until this BattleScreen instance leaves the SceneTree.
 func request_leave() -> bool:
 	_leave_count_for_tests += 1
+	if _leave_in_progress:
+		# Reject duplicate input: no second clear, navigate, or signal emit.
+		return false
+
+	# Lock before any session clear or navigation so concurrent presses cannot re-enter.
+	_leave_in_progress = true
+	_sync_leave_controls()
+
 	if not is_instance_valid(BattleState):
-		return _navigate_leave()
+		var nav_only_ok: bool = _navigate_leave()
+		if not nav_only_ok:
+			_leave_in_progress = false
+			_sync_leave_controls()
+			return false
+		leave_requested.emit()
+		back_requested.emit()
+		return true
 
 	var prior: Dictionary = BattleState.capture_session_snapshot()
 	if BattleState.has_active_session():
@@ -235,11 +262,14 @@ func request_leave() -> bool:
 	var nav_ok: bool = _navigate_leave()
 	if not nav_ok:
 		BattleState.restore_session_snapshot(prior)
+		_leave_in_progress = false
+		_sync_leave_controls()
 		_apply_session_ui()
 		return false
 
 	leave_requested.emit()
 	back_requested.emit()
+	# Success: retain lock so a still-alive node cannot fire a second transition.
 	return true
 
 
@@ -328,8 +358,16 @@ func reset_leave_count_for_tests() -> void:
 	_leave_count_for_tests = 0
 
 
+func is_leave_in_progress_for_tests() -> bool:
+	return _leave_in_progress
+
+
 func press_leave_for_test() -> void:
 	_on_leave_pressed()
+
+
+func press_back_for_test() -> void:
+	_on_back_pressed()
 
 
 func set_leave_nav_result_override_for_tests(ok: bool) -> void:

@@ -494,10 +494,17 @@ func _run_leave_tests() -> void:
 	_assert_eq("lv_nav", str(_nav().call("get_current_screen")), "adventure")
 	_assert_eq("lv_hist0", int(_nav().call("get_history_size")), 0)
 	_assert_true("lv_prep_kept", AdventureState.has_prepared_stage())
+	_assert_true("lv_guard_held_after_success", bool(screen.call("is_leave_in_progress_for_tests")))
+	if screen.leave_requested.is_connected(leave_cb):
+		screen.leave_requested.disconnect(leave_cb)
+	screen.queue_free()
+	await _tree.process_frame
 
-	# Empty-history fallback → adventure, no quit.
+	# Empty-history fallback → adventure, no quit (fresh instance; prior success holds lock).
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.begin_from_prepared_stage()
+	screen = packed.instantiate() as Control
+	_tree.root.add_child(screen)
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
 	_nav().call("reset", &"battle")
@@ -507,62 +514,295 @@ func _run_leave_tests() -> void:
 	_assert_eq("lv_fb_nav", str(_nav().call("get_current_screen")), "adventure")
 	_assert_true("lv_fb_cleared", BattleState.has_active_session() == false)
 	_assert_true("lv_fb_no_quit", _tree != null and is_instance_valid(_tree.root))
-
-	# Navigation failure restores exact prior session.
-	AdventureState.prepare_stage(&"dev_stage_mist_02")
-	# Clear any session first so begin can succeed for mist_02.
-	BattleState.clear_session()
-	BattleState.begin_from_prepared_stage()
-	_assert_eq("lv_fail_seed", str(BattleState.get_stage_id()), "dev_stage_mist_02")
-	var prior: Dictionary = BattleState.capture_session_snapshot()
-	screen.call("configure_screen", &"battle")
+	_assert_true("lv_fb_not_lobby", str(_nav().call("get_current_screen")) != "lobby")
+	screen.queue_free()
 	await _tree.process_frame
-	_nav().call("reset", &"battle")
-	screen.call("set_leave_nav_result_override_for_tests", false)
-	var leave_ok: bool = bool(screen.call("request_leave"))
-	_assert_true("lv_navfail_returns_false", leave_ok == false)
-	_assert_true("lv_navfail_session_restored", BattleState.has_active_session())
-	_assert_eq("lv_navfail_stage", str(BattleState.get_stage_id()), str(prior.get("stage_id", &"")))
-	_assert_eq("lv_navfail_area", str(BattleState.get_area_id()), str(prior.get("area_id", &"")))
-	_assert_eq("lv_navfail_screen", str(_nav().call("get_current_screen")), "battle")
-	screen.call("clear_leave_nav_result_override_for_tests")
 
-	# Repeated leave input while still on battle: only one leave_requested when first succeeds.
+	# --- D1: same-frame double request_leave (true re-entrancy, no re-entry) ---
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	screen = packed.instantiate() as Control
+	_tree.root.add_child(screen)
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
 	_nav().call("reset", &"adventure")
 	_nav().call("navigate_to", &"battle", true)
-	screen.call("reset_leave_count_for_tests")
-	if screen.leave_requested.is_connected(leave_cb):
-		screen.leave_requested.disconnect(leave_cb)
-	var leave_sig2: Array = [0]
-	var leave_cb2 := func() -> void:
-		leave_sig2[0] = int(leave_sig2[0]) + 1
-	screen.leave_requested.connect(leave_cb2)
-	screen.call("press_leave_for_test")
-	await _tree.process_frame
-	_assert_eq("lv_first_nav", str(_nav().call("get_current_screen")), "adventure")
-	_assert_eq("lv_first_sig", int(leave_sig2[0]), 1)
-	# Re-enter battle and leave again — each successful leave emits once (no double fire per press).
-	_nav().call("navigate_to", &"battle", true)
-	AdventureState.prepare_stage(&"dev_stage_beginner_01")
-	BattleState.begin_from_prepared_stage()
-	screen.call("configure_screen", &"battle")
-	await _tree.process_frame
-	screen.call("press_leave_for_test")
-	await _tree.process_frame
-	_assert_eq("lv_dup_press", int(screen.call("get_leave_count_for_tests")), 2)
-	_assert_eq("lv_dup_sig", int(leave_sig2[0]), 2)
-	_assert_eq("lv_dup_final", str(_nav().call("get_current_screen")), "adventure")
-	if screen.leave_requested.is_connected(leave_cb2):
-		screen.leave_requested.disconnect(leave_cb2)
+	_assert_eq("d1_setup_screen", str(_nav().call("get_current_screen")), "battle")
+	_assert_eq("d1_setup_hist", int(_nav().call("get_history_size")), 1)
+	var d1_leave: Array = [0]
+	var d1_back: Array = [0]
+	var d1_nav: Array = [0]
+	var d1_lobby: Array = [0]
+	var d1_leave_cb := func() -> void:
+		d1_leave[0] = int(d1_leave[0]) + 1
+	var d1_back_cb := func() -> void:
+		d1_back[0] = int(d1_back[0]) + 1
+	var d1_nav_cb := func(cur: StringName, prev: StringName) -> void:
+		d1_nav[0] = int(d1_nav[0]) + 1
+		if str(cur) == "lobby":
+			d1_lobby[0] = int(d1_lobby[0]) + 1
+		_assert_true(
+			"d1_transition_is_battle_to_adventure",
+			str(prev) == "battle" and str(cur) == "adventure"
+		)
+	screen.leave_requested.connect(d1_leave_cb)
+	screen.back_requested.connect(d1_back_cb)
+	_nav().screen_changed.connect(d1_nav_cb)
+	# No await between calls — same-frame rapid double leave.
+	var d1_first: bool = bool(screen.call("request_leave"))
+	var d1_second: bool = bool(screen.call("request_leave"))
+	_assert_true("d1_first_true", d1_first == true)
+	_assert_true("d1_second_false", d1_second == false)
+	_assert_eq("d1_nav_screen", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("d1_hist_size", int(_nav().call("get_history_size")), 0)
+	_assert_true("d1_session_cleared", BattleState.has_active_session() == false)
+	_assert_eq("d1_leave_sig", int(d1_leave[0]), 1)
+	_assert_eq("d1_back_sig", int(d1_back[0]), 1)
+	_assert_eq("d1_screen_changed", int(d1_nav[0]), 1)
+	_assert_eq("d1_no_lobby", int(d1_lobby[0]), 0)
+	_assert_true("d1_no_quit", _tree != null and is_instance_valid(_tree.root))
+	_assert_true("d1_guard_held", bool(screen.call("is_leave_in_progress_for_tests")))
+	if _nav().screen_changed.is_connected(d1_nav_cb):
+		_nav().screen_changed.disconnect(d1_nav_cb)
+	if screen.leave_requested.is_connected(d1_leave_cb):
+		screen.leave_requested.disconnect(d1_leave_cb)
+	if screen.back_requested.is_connected(d1_back_cb):
+		screen.back_requested.disconnect(d1_back_cb)
 
+	# --- D4: successful transition still locked on live node before disposal ---
+	var d4_leave: Array = [0]
+	var d4_back: Array = [0]
+	var d4_nav: Array = [0]
+	var d4_leave_cb := func() -> void:
+		d4_leave[0] = int(d4_leave[0]) + 1
+	var d4_back_cb := func() -> void:
+		d4_back[0] = int(d4_back[0]) + 1
+	var d4_nav_cb := func(_c: StringName, _p: StringName) -> void:
+		d4_nav[0] = int(d4_nav[0]) + 1
+	screen.leave_requested.connect(d4_leave_cb)
+	screen.back_requested.connect(d4_back_cb)
+	_nav().screen_changed.connect(d4_nav_cb)
+	var hist_before_d4: int = int(_nav().call("get_history_size"))
+	var d4_second: bool = bool(screen.call("request_leave"))
+	_assert_true("d4_second_false", d4_second == false)
+	_assert_eq("d4_leave_sig_still_0", int(d4_leave[0]), 0)
+	_assert_eq("d4_back_sig_still_0", int(d4_back[0]), 0)
+	_assert_eq("d4_nav_still_0", int(d4_nav[0]), 0)
+	_assert_eq("d4_hist_unchanged", int(_nav().call("get_history_size")), hist_before_d4)
+	_assert_eq("d4_still_adventure", str(_nav().call("get_current_screen")), "adventure")
+	_assert_true("d4_session_still_cleared", BattleState.has_active_session() == false)
+	if _nav().screen_changed.is_connected(d4_nav_cb):
+		_nav().screen_changed.disconnect(d4_nav_cb)
+	if screen.leave_requested.is_connected(d4_leave_cb):
+		screen.leave_requested.disconnect(d4_leave_cb)
+	if screen.back_requested.is_connected(d4_back_cb):
+		screen.back_requested.disconnect(d4_back_cb)
+	# configure must not unlock success lock
+	screen.call("configure_screen", &"battle")
+	_assert_true("d4_cfg_keeps_guard", bool(screen.call("is_leave_in_progress_for_tests")))
+	_assert_true("d4_cfg_leave_disabled", (screen.call("get_leave_button") as Button).disabled)
+	_assert_true("d4_cfg_back_disabled", (screen.call("get_back_button") as Button).disabled)
 	screen.queue_free()
 	await _tree.process_frame
+
+	# --- D2: BackButton + LeaveButton competing input (same frame, no re-enter) ---
+	await _run_competing_button_leave(packed, true)
+	await _run_competing_button_leave(packed, false)
+
+	# --- D3: navigation failure unlocks; retry succeeds ---
+	AdventureState.prepare_stage(&"dev_stage_mist_02")
+	BattleState.clear_session()
+	BattleState.begin_from_prepared_stage()
+	_assert_eq("d3_seed", str(BattleState.get_stage_id()), "dev_stage_mist_02")
+	var prior: Dictionary = BattleState.capture_session_snapshot()
+	screen = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	screen.call("configure_screen", &"battle")
+	await _tree.process_frame
+	_nav().call("reset", &"adventure")
+	_nav().call("navigate_to", &"battle", true)
+	var d3_leave: Array = [0]
+	var d3_back: Array = [0]
+	var d3_nav: Array = [0]
+	var d3_leave_cb := func() -> void:
+		d3_leave[0] = int(d3_leave[0]) + 1
+	var d3_back_cb := func() -> void:
+		d3_back[0] = int(d3_back[0]) + 1
+	var d3_nav_cb := func(_c: StringName, _p: StringName) -> void:
+		d3_nav[0] = int(d3_nav[0]) + 1
+	screen.leave_requested.connect(d3_leave_cb)
+	screen.back_requested.connect(d3_back_cb)
+	_nav().screen_changed.connect(d3_nav_cb)
+	screen.call("set_leave_nav_result_override_for_tests", false)
+	var d3_first: bool = bool(screen.call("request_leave"))
+	_assert_true("d3_first_false", d3_first == false)
+	_assert_true("d3_session_restored", BattleState.has_active_session())
+	_assert_true("d3_snap_exact", _session_snap_equal(prior, BattleState.capture_session_snapshot()))
+	_assert_eq("d3_screen_after_fail", str(_nav().call("get_current_screen")), "battle")
+	_assert_true("d3_guard_unlocked", bool(screen.call("is_leave_in_progress_for_tests")) == false)
+	_assert_true("d3_back_enabled", (screen.call("get_back_button") as Button).disabled == false)
+	_assert_true("d3_leave_enabled", (screen.call("get_leave_button") as Button).disabled == false)
+	_assert_eq("d3_leave_sig_0", int(d3_leave[0]), 0)
+	_assert_eq("d3_back_sig_0", int(d3_back[0]), 0)
+	_assert_eq("d3_nav_0", int(d3_nav[0]), 0)
+	# Legacy navfail field names kept for continuity.
+	_assert_true("lv_navfail_returns_false", d3_first == false)
+	_assert_true("lv_navfail_session_restored", BattleState.has_active_session())
+	_assert_eq("lv_navfail_stage", str(BattleState.get_stage_id()), str(prior.get("stage_id", &"")))
+	_assert_eq("lv_navfail_area", str(BattleState.get_area_id()), str(prior.get("area_id", &"")))
+	_assert_eq("lv_navfail_screen", str(_nav().call("get_current_screen")), "battle")
+
+	# Allow navigation (clear override = real go_back_or_fallback succeeds).
+	screen.call("clear_leave_nav_result_override_for_tests")
+	var d3_second: bool = bool(screen.call("request_leave"))
+	_assert_true("d3_second_true", d3_second == true)
+	_assert_true("d3_session_cleared", BattleState.has_active_session() == false)
+	_assert_eq("d3_final_screen", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("d3_leave_sig_1", int(d3_leave[0]), 1)
+	_assert_eq("d3_back_sig_1", int(d3_back[0]), 1)
+	_assert_eq("d3_nav_1", int(d3_nav[0]), 1)
+	_assert_true("d3_guard_held_after_success", bool(screen.call("is_leave_in_progress_for_tests")))
+	if _nav().screen_changed.is_connected(d3_nav_cb):
+		_nav().screen_changed.disconnect(d3_nav_cb)
+	if screen.leave_requested.is_connected(d3_leave_cb):
+		screen.leave_requested.disconnect(d3_leave_cb)
+	if screen.back_requested.is_connected(d3_back_cb):
+		screen.back_requested.disconnect(d3_back_cb)
+	screen.queue_free()
+	await _tree.process_frame
+
+	# --- D5: independent new BattleScreen instance can leave once ---
+	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	BattleState.clear_session()
+	BattleState.begin_from_prepared_stage()
+	var screen2: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen2)
+	screen2.call("configure_screen", &"battle")
+	await _tree.process_frame
+	_nav().call("reset", &"adventure")
+	_nav().call("navigate_to", &"battle", true)
+	var d5_leave: Array = [0]
+	var d5_back: Array = [0]
+	var d5_nav: Array = [0]
+	var d5_leave_cb := func() -> void:
+		d5_leave[0] = int(d5_leave[0]) + 1
+	var d5_back_cb := func() -> void:
+		d5_back[0] = int(d5_back[0]) + 1
+	var d5_nav_cb := func(_c: StringName, _p: StringName) -> void:
+		d5_nav[0] = int(d5_nav[0]) + 1
+	screen2.leave_requested.connect(d5_leave_cb)
+	screen2.back_requested.connect(d5_back_cb)
+	_nav().screen_changed.connect(d5_nav_cb)
+	_assert_true("d5_guard_fresh", bool(screen2.call("is_leave_in_progress_for_tests")) == false)
+	var d5_ok: bool = bool(screen2.call("request_leave"))
+	_assert_true("d5_leave_ok", d5_ok == true)
+	_assert_eq("d5_nav_screen", str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("d5_hist", int(_nav().call("get_history_size")), 0)
+	_assert_true("d5_session_cleared", BattleState.has_active_session() == false)
+	_assert_eq("d5_leave_sig", int(d5_leave[0]), 1)
+	_assert_eq("d5_back_sig", int(d5_back[0]), 1)
+	_assert_eq("d5_nav_count", int(d5_nav[0]), 1)
+	# Same-instance second leave still blocked on the new instance after success.
+	_assert_true("d5_second_blocked", bool(screen2.call("request_leave")) == false)
+	_assert_eq("d5_leave_sig_still_1", int(d5_leave[0]), 1)
+	_assert_eq("d5_nav_still_1", int(d5_nav[0]), 1)
+	if _nav().screen_changed.is_connected(d5_nav_cb):
+		_nav().screen_changed.disconnect(d5_nav_cb)
+	if screen2.leave_requested.is_connected(d5_leave_cb):
+		screen2.leave_requested.disconnect(d5_leave_cb)
+	if screen2.back_requested.is_connected(d5_back_cb):
+		screen2.back_requested.disconnect(d5_back_cb)
+	screen2.queue_free()
+	await _tree.process_frame
 	print("[INFO] battle leave tests passed")
+
+
+## D2 helper: same-frame competing Back/Leave presses on one live BattleScreen.
+## back_first=true → Back then Leave; false → Leave then Back.
+func _run_competing_button_leave(packed: PackedScene, back_first: bool) -> void:
+	var tag: String = "bl" if back_first else "lb"
+	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	BattleState.clear_session()
+	BattleState.begin_from_prepared_stage()
+	var screen: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	screen.call("configure_screen", &"battle")
+	await _tree.process_frame
+	_nav().call("reset", &"adventure")
+	_nav().call("navigate_to", &"battle", true)
+	_assert_eq("d2_%s_setup_screen" % tag, str(_nav().call("get_current_screen")), "battle")
+	_assert_eq("d2_%s_setup_hist" % tag, int(_nav().call("get_history_size")), 1)
+	var leave_n: Array = [0]
+	var back_n: Array = [0]
+	var nav_n: Array = [0]
+	var lobby_n: Array = [0]
+	var leave_cb := func() -> void:
+		leave_n[0] = int(leave_n[0]) + 1
+	var back_cb := func() -> void:
+		back_n[0] = int(back_n[0]) + 1
+	var nav_cb := func(cur: StringName, prev: StringName) -> void:
+		nav_n[0] = int(nav_n[0]) + 1
+		if str(cur) == "lobby":
+			lobby_n[0] = int(lobby_n[0]) + 1
+		_assert_true(
+			"d2_%s_transition_battle_to_adventure" % tag,
+			str(prev) == "battle" and str(cur) == "adventure"
+		)
+	screen.leave_requested.connect(leave_cb)
+	screen.back_requested.connect(back_cb)
+	_nav().screen_changed.connect(nav_cb)
+	# Same frame: no await, no re-session, no re-navigate between presses.
+	if back_first:
+		screen.call("press_back_for_test")
+		screen.call("press_leave_for_test")
+	else:
+		screen.call("press_leave_for_test")
+		screen.call("press_back_for_test")
+	_assert_eq("d2_%s_nav_count" % tag, int(nav_n[0]), 1)
+	_assert_eq("d2_%s_leave_sig" % tag, int(leave_n[0]), 1)
+	_assert_eq("d2_%s_back_sig" % tag, int(back_n[0]), 1)
+	_assert_eq("d2_%s_final_screen" % tag, str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("d2_%s_hist" % tag, int(_nav().call("get_history_size")), 0)
+	_assert_true("d2_%s_session_cleared" % tag, BattleState.has_active_session() == false)
+	_assert_eq("d2_%s_no_lobby" % tag, int(lobby_n[0]), 0)
+	_assert_true("d2_%s_no_quit" % tag, _tree != null and is_instance_valid(_tree.root))
+	_assert_true("d2_%s_guard_held" % tag, bool(screen.call("is_leave_in_progress_for_tests")))
+	if _nav().screen_changed.is_connected(nav_cb):
+		_nav().screen_changed.disconnect(nav_cb)
+	if screen.leave_requested.is_connected(leave_cb):
+		screen.leave_requested.disconnect(leave_cb)
+	if screen.back_requested.is_connected(back_cb):
+		screen.back_requested.disconnect(back_cb)
+	screen.queue_free()
+	await _tree.process_frame
+
+
+func _session_snap_equal(a: Dictionary, b: Dictionary) -> bool:
+	if bool(a.get("active", false)) != bool(b.get("active", false)):
+		return false
+	if str(a.get("stage_id", &"")) != str(b.get("stage_id", &"")):
+		return false
+	if str(a.get("area_id", &"")) != str(b.get("area_id", &"")):
+		return false
+	if str(a.get("leader_character_id", &"")) != str(b.get("leader_character_id", &"")):
+		return false
+	if str(a.get("stage_display_name", "")) != str(b.get("stage_display_name", "")):
+		return false
+	if str(a.get("stage_summary", "")) != str(b.get("stage_summary", "")):
+		return false
+	if int(a.get("stage_number", 0)) != int(b.get("stage_number", 0)):
+		return false
+	if str(a.get("area_display_name", "")) != str(b.get("area_display_name", "")):
+		return false
+	var pa: Array = a.get("party_character_ids", []) as Array
+	var pb: Array = b.get("party_character_ids", []) as Array
+	if pa.size() != pb.size():
+		return false
+	for i in pa.size():
+		if str(pa[i]) != str(pb[i]):
+			return false
+	return true
 
 
 func _run_layout_tests() -> void:
