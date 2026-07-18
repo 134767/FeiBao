@@ -1,4 +1,4 @@
-## Dedicated adventure area/stage selection screen (0.8.0 prepare + 0.9.0 enter battle).
+## Dedicated adventure area/stage selection screen (0.8.0 prepare + 1.0.0 enter battle).
 extends Control
 
 signal back_requested
@@ -8,9 +8,10 @@ signal battle_entered(stage_id: StringName)
 const CARD_SCENE_PATH: String = "res://scenes/screens/adventure/stage_card.tscn"
 const MSG_PREPARE_OK: String = "關卡準備完成"
 const MSG_PREPARE_FAIL: String = "無法準備此關卡"
-const MSG_ENTER_OK: String = "已進入戰鬥工作階段"
+const MSG_ENTER_OK: String = "已進入戰鬥盤面"
 const MSG_ENTER_FAIL: String = "無法進入戰鬥"
 const MSG_SESSION_FAIL: String = "無法建立戰鬥工作階段"
+const MSG_RUNTIME_FAIL: String = "無法建立戰鬥盤面"
 const MSG_NAV_FAIL: String = "無法進入戰鬥畫面"
 const MSG_NO_PARTY: String = "無法讀取隊伍資料"
 const MSG_INVALID_PARTY: String = "出戰隊伍無效"
@@ -56,11 +57,15 @@ var _load_error: String = ""
 var _prepare_refresh_count_for_tests: int = 0
 var _party_summary_refresh_count_for_tests: int = 0
 var _enter_press_count_for_tests: int = 0
+## Enter-battle transaction lock (same strictness as BattleScreen leave guard).
+var _enter_in_progress: bool = false
 ## Test fixture overrides (null = production path).
 var _stage_catalog_override_for_tests: Variant = null
 var _player_data_available_override_for_tests: Variant = null
 ## When set to bool, overrides NavigationState.navigate_to for enter-battle transaction tests.
 var _enter_nav_result_override_for_tests: Variant = null
+## When set to bool, overrides BattleRuntime.begin_from_battle_session for tests.
+var _runtime_begin_result_override_for_tests: Variant = null
 
 
 func _ready() -> void:
@@ -77,6 +82,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_unbind_domain_signals()
+	_enter_in_progress = false
 
 
 func _notification(what: int) -> void:
@@ -399,12 +405,16 @@ func _is_party_valid_for_battle() -> bool:
 func _update_enter_battle_button() -> void:
 	if _enter_battle_button == null:
 		return
+	if _enter_in_progress:
+		_enter_battle_button.disabled = true
+		return
 	var prepared: bool = is_instance_valid(AdventureState) and AdventureState.has_prepared_stage()
 	var ok: bool = (
 		_load_ok
 		and prepared
 		and _is_player_data_available()
 		and is_instance_valid(BattleState)
+		and is_instance_valid(BattleRuntime)
 		and _is_party_valid_for_battle()
 	)
 	_enter_battle_button.disabled = not ok
@@ -463,7 +473,9 @@ func _on_prepare_pressed() -> void:
 
 func _on_enter_battle_pressed() -> void:
 	_enter_press_count_for_tests += 1
-	# Transaction: snapshot → begin → navigate; restore snapshot on nav failure.
+	# Transaction: re-entrancy guard → state/runtime snapshots → begin both → navigate.
+	if _enter_in_progress:
+		return
 	if not _is_player_data_available():
 		_set_mutation_message(MSG_NO_PARTY)
 		return
@@ -476,25 +488,59 @@ func _on_enter_battle_pressed() -> void:
 	if not is_instance_valid(BattleState):
 		_set_mutation_message(MSG_SESSION_FAIL)
 		return
+	if not is_instance_valid(BattleRuntime):
+		_set_mutation_message(MSG_RUNTIME_FAIL)
+		return
 	if not _is_party_valid_for_battle():
 		_set_mutation_message(MSG_INVALID_PARTY)
 		return
 
-	var prior: Dictionary = BattleState.capture_session_snapshot()
+	_enter_in_progress = true
+	if _enter_battle_button != null:
+		_enter_battle_button.disabled = true
+
+	var prior_state: Dictionary = BattleState.capture_session_snapshot()
+	var prior_runtime: Dictionary = BattleRuntime.capture_runtime_snapshot()
+
 	var begin: Dictionary = BattleState.begin_from_prepared_stage()
 	if not bool(begin.get("ok", false)):
-		BattleState.restore_session_snapshot(prior)
+		BattleState.restore_session_snapshot(prior_state)
+		BattleRuntime.restore_runtime_snapshot(prior_runtime)
+		_enter_in_progress = false
+		_update_enter_battle_button()
 		_set_mutation_message(MSG_SESSION_FAIL)
+		return
+
+	var runtime_begin: Dictionary = _begin_runtime_for_enter()
+	if not bool(runtime_begin.get("ok", false)):
+		BattleRuntime.restore_runtime_snapshot(prior_runtime)
+		BattleState.restore_session_snapshot(prior_state)
+		_enter_in_progress = false
+		_update_enter_battle_button()
+		_set_mutation_message(MSG_RUNTIME_FAIL)
 		return
 
 	var nav_ok: bool = _navigate_to_battle_for_enter()
 	if not nav_ok:
-		BattleState.restore_session_snapshot(prior)
+		# Exact rollback: restore runtime then state binding-safe order is state first then runtime.
+		BattleState.restore_session_snapshot(prior_state)
+		BattleRuntime.restore_runtime_snapshot(prior_runtime)
+		_enter_in_progress = false
+		_update_enter_battle_button()
 		_set_mutation_message(MSG_NAV_FAIL)
 		return
 
 	_set_mutation_message(MSG_ENTER_OK)
 	battle_entered.emit(BattleState.get_stage_id())
+	# Success: keep enter lock until this AdventureScreen leaves the tree.
+
+
+func _begin_runtime_for_enter() -> Dictionary:
+	if _runtime_begin_result_override_for_tests is bool:
+		if bool(_runtime_begin_result_override_for_tests):
+			return {"ok": true, "changed": true, "error": ""}
+		return {"ok": false, "changed": false, "error": "runtime begin override fail"}
+	return BattleRuntime.begin_from_battle_session()
 
 
 func _navigate_to_battle_for_enter() -> bool:
@@ -743,6 +789,18 @@ func set_enter_nav_result_override_for_tests(ok: bool) -> void:
 
 func clear_enter_nav_result_override_for_tests() -> void:
 	_enter_nav_result_override_for_tests = null
+
+
+func set_runtime_begin_result_override_for_tests(ok: bool) -> void:
+	_runtime_begin_result_override_for_tests = ok
+
+
+func clear_runtime_begin_result_override_for_tests() -> void:
+	_runtime_begin_result_override_for_tests = null
+
+
+func is_enter_in_progress_for_tests() -> bool:
+	return _enter_in_progress
 
 
 func is_enter_battle_enabled() -> bool:

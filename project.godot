@@ -24,6 +24,7 @@ NavigationState="*res://autoload/navigation_state.gd"
 PlayerData="*res://autoload/player_data.gd"
 AdventureState="*res://autoload/adventure_state.gd"
 BattleState="*res://autoload/battle_state.gd"
+BattleRuntime="*res://autoload/battle_runtime.gd"
 
 [display]
 

@@ -37,6 +37,8 @@ func _nav() -> Node:
 func _reset_domain() -> void:
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleRuntime):
+		BattleRuntime.reset_runtime_state_for_tests()
 	if is_instance_valid(BattleState):
 		BattleState.reset_runtime_state_for_tests()
 
@@ -101,7 +103,7 @@ func _run_session_unit_tests() -> void:
 	PlayerData.initialize()
 	_reset_domain()
 	_assert_true("bs_init_inactive", BattleState.has_active_session() == false)
-	_assert_eq("bs_app_version", FeiBaoConstants.APP_VERSION, "0.9.0")
+	_assert_eq("bs_app_version", FeiBaoConstants.APP_VERSION, "1.0.0")
 	_assert_eq(
 		"bs_path_battle",
 		FeiBaoConstants.PATH_BATTLE_SCREEN,
@@ -335,24 +337,42 @@ func _run_adventure_enter_tests() -> void:
 	_assert_eq("ent_press1", int(adv.call("get_enter_press_count_for_tests")), 1)
 	_assert_eq("ent_sig1", int(enter_sig[0]), 1)
 	_assert_true("ent_session", BattleState.has_active_session())
+	_assert_true("ent_runtime", BattleRuntime.has_active_runtime())
 	_assert_eq("ent_stage", str(BattleState.get_stage_id()), "dev_stage_mist_01")
 	_assert_eq("ent_nav", str(_nav().call("get_current_screen")), "battle")
 	_assert_eq("ent_hist_prev", str(_nav().call("get_previous_screen")), "adventure")
 	_assert_eq("ent_rev", PlayerData.get_profile().get_revision(), rev_before)
 	_assert_true("ent_no_disk", PlayerData.did_last_save_write_disk() == false)
 	_assert_true("ent_msg", str(adv.call("get_mutation_message")).find("戰鬥") >= 0)
+	_assert_true("ent_guard_held", bool(adv.call("is_enter_in_progress_for_tests")))
+	# Same-frame double enter: second press rejected (no second signal).
+	adv.call("press_enter_battle_for_test")
+	_assert_eq("ent_dbl_press_sig", int(enter_sig[0]), 1)
+	if adv.battle_entered.is_connected(enter_cb):
+		adv.battle_entered.disconnect(enter_cb)
+	adv.queue_free()
+	await _tree.process_frame
 
-	# Navigation failure rolls back session exactly.
+	# Fresh Adventure instance for failure / re-enter cases (success lock held until exit).
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	_nav().call("reset", &"adventure")
+	adv = packed.instantiate() as Control
+	_tree.root.add_child(adv)
+	adv.call("configure_screen", &"adventure")
+	await _tree.process_frame
+	adv.call("select_area_for_test", &"dev_area_mist_ridge")
+	adv.call("select_stage_for_test", &"dev_stage_mist_01")
 	adv.call("press_prepare_for_test")
 	await _tree.process_frame
 	var snap_before: Dictionary = BattleState.capture_session_snapshot()
+	var rt_before: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	_assert_true("ent_navfail_prep", AdventureState.has_prepared_stage())
 	adv.call("set_enter_nav_result_override_for_tests", false)
 	adv.call("press_enter_battle_for_test")
 	await _tree.process_frame
 	_assert_true("ent_navfail_no_session", BattleState.has_active_session() == false)
+	_assert_true("ent_navfail_no_runtime", BattleRuntime.has_active_runtime() == false)
 	_assert_eq("ent_navfail_nav", str(_nav().call("get_current_screen")), "adventure")
 	_assert_true("ent_navfail_prep_kept", AdventureState.has_prepared_stage())
 	_assert_eq(
@@ -360,8 +380,23 @@ func _run_adventure_enter_tests() -> void:
 		str(BattleState.get_stage_id()),
 		str(snap_before.get("stage_id", &""))
 	)
+	_assert_eq(
+		"ent_navfail_rt_active",
+		bool(BattleRuntime.capture_runtime_snapshot().get("active", true)),
+		bool(rt_before.get("active", false))
+	)
 	_assert_true("ent_navfail_msg", str(adv.call("get_mutation_message")).find("無法進入") >= 0)
+	_assert_true("ent_navfail_unlocked", bool(adv.call("is_enter_in_progress_for_tests")) == false)
 	adv.call("clear_enter_nav_result_override_for_tests")
+
+	# Runtime begin failure rolls back BattleState.
+	adv.call("set_runtime_begin_result_override_for_tests", false)
+	adv.call("press_enter_battle_for_test")
+	await _tree.process_frame
+	_assert_true("ent_rtfail_no_session", BattleState.has_active_session() == false)
+	_assert_true("ent_rtfail_no_runtime", BattleRuntime.has_active_runtime() == false)
+	_assert_true("ent_rtfail_msg", str(adv.call("get_mutation_message")).find("盤面") >= 0)
+	adv.call("clear_runtime_begin_result_override_for_tests")
 
 	# Repeated configure does not duplicate enter callback.
 	adv.call("configure_screen", &"adventure")
@@ -369,9 +404,6 @@ func _run_adventure_enter_tests() -> void:
 	await _tree.process_frame
 	adv.call("reset_enter_press_count_for_tests")
 	var enter_sig2: Array = [0]
-	# disconnect old, re-bind once
-	if adv.battle_entered.is_connected(enter_cb):
-		adv.battle_entered.disconnect(enter_cb)
 	var enter_cb2 := func(_sid: StringName) -> void:
 		enter_sig2[0] = int(enter_sig2[0]) + 1
 	adv.battle_entered.connect(enter_cb2)
@@ -380,6 +412,7 @@ func _run_adventure_enter_tests() -> void:
 	await _tree.process_frame
 	_assert_eq("ent_dbl_cfg_press", int(adv.call("get_enter_press_count_for_tests")), 1)
 	_assert_eq("ent_dbl_cfg_sig", int(enter_sig2[0]), 1)
+	_assert_true("ent_dbl_cfg_runtime", BattleRuntime.has_active_runtime())
 	if adv.battle_entered.is_connected(enter_cb2):
 		adv.battle_entered.disconnect(enter_cb2)
 
@@ -395,6 +428,8 @@ func _run_screen_tests() -> void:
 	AdventureState.prepare_stage(&"dev_stage_beginner_02")
 	var sess: Dictionary = BattleState.begin_from_prepared_stage()
 	_assert_true("bat_sess_seed", bool(sess.get("ok", false)))
+	var rt: Dictionary = BattleRuntime.begin_from_battle_session()
+	_assert_true("bat_rt_seed", bool(rt.get("ok", false)))
 
 	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
 	_assert_true("bat_scene_load", packed != null)
@@ -469,6 +504,7 @@ func _run_leave_tests() -> void:
 	_reset_domain()
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 
 	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
 	var screen: Control = packed.instantiate() as Control
@@ -503,6 +539,7 @@ func _run_leave_tests() -> void:
 	# Empty-history fallback → adventure, no quit (fresh instance; prior success holds lock).
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	screen = packed.instantiate() as Control
 	_tree.root.add_child(screen)
 	screen.call("configure_screen", &"battle")
@@ -520,8 +557,10 @@ func _run_leave_tests() -> void:
 
 	# --- D1: same-frame double request_leave (true re-entrancy, no re-entry) ---
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	screen = packed.instantiate() as Control
 	_tree.root.add_child(screen)
 	screen.call("configure_screen", &"battle")
@@ -612,8 +651,10 @@ func _run_leave_tests() -> void:
 
 	# --- D3: navigation failure unlocks; retry succeeds ---
 	AdventureState.prepare_stage(&"dev_stage_mist_02")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	_assert_eq("d3_seed", str(BattleState.get_stage_id()), "dev_stage_mist_02")
 	var prior: Dictionary = BattleState.capture_session_snapshot()
 	screen = packed.instantiate() as Control
@@ -674,8 +715,10 @@ func _run_leave_tests() -> void:
 
 	# --- D5: independent new BattleScreen instance can leave once ---
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	var screen2: Control = packed.instantiate() as Control
 	_tree.root.add_child(screen2)
 	screen2.call("configure_screen", &"battle")
@@ -723,8 +766,10 @@ func _run_leave_tests() -> void:
 func _run_competing_button_leave(packed: PackedScene, back_first: bool) -> void:
 	var tag: String = "bl" if back_first else "lb"
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	var screen: Control = packed.instantiate() as Control
 	_tree.root.add_child(screen)
 	screen.call("configure_screen", &"battle")
@@ -812,22 +857,27 @@ func _run_layout_tests() -> void:
 	_reset_domain()
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	for size in [Vector2i(360, 640), Vector2i(390, 844), Vector2i(720, 1280)]:
 		await _probe_battle_layout(size, 1)
 
 	# Party size 2.
 	PlayerData.grant_character(&"partner_a")
 	PlayerData.add_party_member(&"partner_a")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	_assert_eq("ly_party2_size", BattleState.get_party_character_ids().size(), 2)
 	await _probe_battle_layout(Vector2i(360, 640), 2)
 
 	# Party size 3.
 	PlayerData.grant_character(&"partner_b")
 	PlayerData.add_party_member(&"partner_b")
+	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
 	BattleState.begin_from_prepared_stage()
+	BattleRuntime.begin_from_battle_session()
 	_assert_eq("ly_party3_size", BattleState.get_party_character_ids().size(), 3)
 	await _probe_battle_layout(Vector2i(360, 640), 3)
 

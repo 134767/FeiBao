@@ -9,7 +9,7 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (0.9.0) ===")
+	print("=== FeiBao Test Runner (1.0.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
 
@@ -32,15 +32,19 @@ func _run_tests() -> void:
 		"res://tests/active_party_smoke_test.gd",
 		"res://tests/adventure_stage_smoke_test.gd",
 		"res://tests/battle_session_smoke_test.gd",
+		"res://tests/battle_board_turn_loop_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
 	var adventure_state: Node = root.get_node_or_null("AdventureState")
 	var battle_state: Node = root.get_node_or_null("BattleState")
+	var battle_runtime: Node = root.get_node_or_null("BattleRuntime")
 	if adventure_state != null and adventure_state.has_method("reset_runtime_state_for_tests"):
 		adventure_state.call("reset_runtime_state_for_tests")
 	if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
 		battle_state.call("reset_runtime_state_for_tests")
+	if battle_runtime != null and battle_runtime.has_method("reset_runtime_state_for_tests"):
+		battle_runtime.call("reset_runtime_state_for_tests")
 
 	for path in suites:
 		print("--- Suite: %s ---" % path)
@@ -48,6 +52,8 @@ func _run_tests() -> void:
 			adventure_state.call("reset_runtime_state_for_tests")
 		if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
 			battle_state.call("reset_runtime_state_for_tests")
+		if battle_runtime != null and battle_runtime.has_method("reset_runtime_state_for_tests"):
+			battle_runtime.call("reset_runtime_state_for_tests")
 		var script: GDScript = load(path) as GDScript
 		if script == null:
 			print("[FAIL] load_suite: %s" % path)
@@ -74,6 +80,8 @@ func _run_tests() -> void:
 		adventure_state.call("reset_runtime_state_for_tests")
 	if battle_state != null and battle_state.has_method("reset_runtime_state_for_tests"):
 		battle_state.call("reset_runtime_state_for_tests")
+	if battle_runtime != null and battle_runtime.has_method("reset_runtime_state_for_tests"):
+		battle_runtime.call("reset_runtime_state_for_tests")
 
 	var prod_after: Dictionary = _snapshot_production_artifacts()
 	if not _production_fingerprints_match(prod_before, prod_after):
