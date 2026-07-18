@@ -16,6 +16,8 @@ func run_all() -> void:
 	var prod_before: Dictionary = _snapshot_production()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	_run_catalog_tests()
 	_run_adventure_state_tests()
 	_run_registry_tests()
@@ -24,6 +26,8 @@ func run_all() -> void:
 	_cleanup_cases()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
 	PlayerData.reset_runtime_state_for_tests()
 	var prod_after: Dictionary = _snapshot_production()
@@ -48,6 +52,8 @@ func _begin_case(tag: String) -> String:
 	PlayerData.cleanup_test_artifacts()
 	if is_instance_valid(AdventureState):
 		AdventureState.reset_runtime_state_for_tests()
+	if is_instance_valid(BattleState):
+		BattleState.reset_runtime_state_for_tests()
 	return path
 
 
@@ -449,11 +455,16 @@ func _run_adventure_state_tests() -> void:
 	_assert_true("as_prep_copy_b", prep_b != null)
 	_assert_true("as_prep_not_same_instance", prep_a != prep_b)
 	_assert_eq("as_prep_copy_id", str(prep_a.get_id()), str(prep_b.get_id()))
-	_assert_eq("as_app_version", FeiBaoConstants.APP_VERSION, "0.8.0")
+	_assert_eq("as_app_version", FeiBaoConstants.APP_VERSION, "0.9.0")
 	_assert_eq(
 		"as_path_adventure",
 		FeiBaoConstants.PATH_ADVENTURE_SCREEN,
 		"res://scenes/screens/adventure/adventure_screen.tscn"
+	)
+	_assert_eq(
+		"as_path_battle",
+		FeiBaoConstants.PATH_BATTLE_SCREEN,
+		"res://scenes/screens/battle/battle_screen.tscn"
 	)
 
 	if AdventureState.prepared_stage_changed.is_connected(on_sig):

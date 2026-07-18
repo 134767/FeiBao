@@ -1,0 +1,148 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scenes/screens/battle/battle_screen.gd" id="1_screen"]
+
+[node name="BattleScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_screen")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="RootVBox" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderRow" type="HBoxContainer" parent="Margin/RootVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="BackButton" type="Button" parent="Margin/RootVBox/HeaderRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 48)
+focus_mode = 2
+layout_mode = 2
+text = "返回"
+
+[node name="TitleLabel" type="Label" parent="Margin/RootVBox/HeaderRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 26
+text = "戰鬥"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="BodyScroll" type="ScrollContainer" parent="Margin/RootVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
+
+[node name="BodyContent" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="SeedHintLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "本頁為戰鬥工作階段殼層，非正式戰鬥。"
+autowrap_mode = 3
+
+[node name="ShellStatusLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "戰鬥系統殼層 · 開發樣本 · 尚無真實戰鬥"
+autowrap_mode = 3
+
+[node name="StageNameLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = ""
+autowrap_mode = 3
+
+[node name="StageNumberLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = ""
+autowrap_mode = 3
+
+[node name="AreaNameLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = ""
+autowrap_mode = 3
+
+[node name="StageSummaryLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = ""
+autowrap_mode = 3
+
+[node name="LeaderLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = ""
+autowrap_mode = 3
+
+[node name="PartyHeaderLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = ""
+autowrap_mode = 3
+
+[node name="PartyListLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = ""
+autowrap_mode = 3
+
+[node name="ErrorLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.25, 0.2, 1)
+text = ""
+autowrap_mode = 3
+
+[node name="BottomActions" type="HBoxContainer" parent="Margin/RootVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="LeaveButton" type="Button" parent="Margin/RootVBox/BottomActions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 48)
+focus_mode = 2
+layout_mode = 2
+size_flags_horizontal = 3
+text = "離開戰鬥"

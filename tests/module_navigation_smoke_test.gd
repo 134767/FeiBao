@@ -31,7 +31,7 @@ func _app() -> Node:
 
 func _run_registry_tests() -> void:
 	var ids: Array[StringName] = ScreenRegistry.get_registered_ids()
-	_assert_eq("registry_screen_count", ids.size(), 9)
+	_assert_eq("registry_screen_count", ids.size(), 10)
 	var modules: Array[StringName] = ScreenRegistry.get_module_ids()
 	_assert_eq("registry_module_count", modules.size(), 6)
 	_assert_eq("registry_module_order_0", str(modules[0]), "adventure")

@@ -36,4 +36,4 @@ Combat, enemies, HP/ATK, drops, stage completion persistence, stamina, multiplay
 
 ## Next
 
-0.9.0 is expected to consume AdventureState prepared stage context for a battle vertical slice.
+0.9.0 consumes AdventureState prepared stage context for a memory-only battle session shell (see `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`).

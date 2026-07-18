@@ -1,13 +1,19 @@
-## Dedicated adventure area/stage selection screen (no real battle in 0.8.0).
+## Dedicated adventure area/stage selection screen (0.8.0 prepare + 0.9.0 enter battle).
 extends Control
 
 signal back_requested
 signal stage_prepared(stage_id: StringName)
+signal battle_entered(stage_id: StringName)
 
 const CARD_SCENE_PATH: String = "res://scenes/screens/adventure/stage_card.tscn"
-const MSG_PREPARE_OK: String = "關卡準備完成，戰鬥系統將於後續版本開放"
+const MSG_PREPARE_OK: String = "關卡準備完成"
 const MSG_PREPARE_FAIL: String = "無法準備此關卡"
+const MSG_ENTER_OK: String = "已進入戰鬥工作階段"
+const MSG_ENTER_FAIL: String = "無法進入戰鬥"
+const MSG_SESSION_FAIL: String = "無法建立戰鬥工作階段"
+const MSG_NAV_FAIL: String = "無法進入戰鬥畫面"
 const MSG_NO_PARTY: String = "無法讀取隊伍資料"
+const MSG_INVALID_PARTY: String = "出戰隊伍無效"
 const MSG_CATALOG_FAIL: String = "冒險關卡資料載入失敗"
 const SEED_HINT: String = "本頁內容為開發樣本，非正式世界觀。"
 const PARTY_SUMMARY_FMT: String = "目前隊伍 %d 人 · 領隊：%s"
@@ -28,6 +34,7 @@ const STAGE_WIDE_MIN_WIDTH: float = 600.0
 @onready var _detail_status_label: Label = %DetailStatusLabel
 @onready var _party_summary_label: Label = %PartySummaryLabel
 @onready var _prepare_button: Button = %PrepareButton
+@onready var _enter_battle_button: Button = %EnterBattleButton
 @onready var _mutation_message_label: Label = %MutationMessageLabel
 @onready var _error_label: Label = %ErrorLabel
 
@@ -48,9 +55,12 @@ var _load_ok: bool = false
 var _load_error: String = ""
 var _prepare_refresh_count_for_tests: int = 0
 var _party_summary_refresh_count_for_tests: int = 0
+var _enter_press_count_for_tests: int = 0
 ## Test fixture overrides (null = production path).
 var _stage_catalog_override_for_tests: Variant = null
 var _player_data_available_override_for_tests: Variant = null
+## When set to bool, overrides NavigationState.navigate_to for enter-battle transaction tests.
+var _enter_nav_result_override_for_tests: Variant = null
 
 
 func _ready() -> void:
@@ -81,6 +91,8 @@ func _bind_signals() -> void:
 		_back_button.pressed.connect(_on_back_pressed)
 	if _prepare_button != null and not _prepare_button.pressed.is_connected(_on_prepare_pressed):
 		_prepare_button.pressed.connect(_on_prepare_pressed)
+	if _enter_battle_button != null and not _enter_battle_button.pressed.is_connected(_on_enter_battle_pressed):
+		_enter_battle_button.pressed.connect(_on_enter_battle_pressed)
 	_signals_bound = true
 
 
@@ -130,6 +142,9 @@ func _reload_all() -> void:
 	if _prepare_button != null:
 		_prepare_button.text = "準備此關卡"
 		_prepare_button.custom_minimum_size = Vector2(maxf(_prepare_button.custom_minimum_size.x, 120), 48)
+	if _enter_battle_button != null:
+		_enter_battle_button.text = "進入戰鬥"
+		_enter_battle_button.custom_minimum_size = Vector2(maxf(_enter_battle_button.custom_minimum_size.x, 120), 48)
 	_set_mutation_message("")
 	_hide_error()
 
@@ -151,6 +166,7 @@ func _reload_all() -> void:
 	_update_detail()
 	_update_party_summary()
 	_update_prepare_button()
+	_update_enter_battle_button()
 	_refresh_columns()
 
 
@@ -352,6 +368,48 @@ func _update_prepare_button() -> void:
 	_prepare_button.disabled = not ok
 
 
+func _is_party_valid_for_battle() -> bool:
+	if not _is_player_data_available() or not is_instance_valid(PlayerData):
+		return false
+	if not PlayerData.is_initialized():
+		PlayerData.initialize()
+	var party: Array[StringName] = PlayerData.get_active_party_character_ids()
+	if party.size() < BattleState.PARTY_MIN or party.size() > BattleState.PARTY_MAX:
+		return false
+	var leader: StringName = PlayerData.get_party_leader_character_id()
+	if party.is_empty() or party[0] != leader:
+		return false
+	var cat: Dictionary = CharacterCatalog.load_default()
+	if not bool(cat.get("ok", false)):
+		return false
+	var known: Dictionary = {}
+	for item in cat.get("characters", []):
+		if item is CharacterDefinition:
+			known[(item as CharacterDefinition).get_id()] = true
+	var seen: Dictionary = {}
+	for id in party:
+		if String(id).is_empty() or seen.has(id) or not known.has(id):
+			return false
+		if not PlayerData.owns_character(id):
+			return false
+		seen[id] = true
+	return true
+
+
+func _update_enter_battle_button() -> void:
+	if _enter_battle_button == null:
+		return
+	var prepared: bool = is_instance_valid(AdventureState) and AdventureState.has_prepared_stage()
+	var ok: bool = (
+		_load_ok
+		and prepared
+		and _is_player_data_available()
+		and is_instance_valid(BattleState)
+		and _is_party_valid_for_battle()
+	)
+	_enter_battle_button.disabled = not ok
+
+
 func _on_area_pressed(area_id: StringName) -> void:
 	if area_id == _selected_area_id:
 		_update_area_story()
@@ -368,6 +426,7 @@ func _on_area_pressed(area_id: StringName) -> void:
 	_update_area_story()
 	_update_detail()
 	_update_prepare_button()
+	_update_enter_battle_button()
 
 
 func _on_stage_card_activated(stage_id: StringName) -> void:
@@ -375,10 +434,11 @@ func _on_stage_card_activated(stage_id: StringName) -> void:
 	_set_mutation_message("")
 	_update_detail()
 	_update_prepare_button()
+	_update_enter_battle_button()
 
 
 func _on_prepare_pressed() -> void:
-	# Handler is fail-safe even when Button.disabled is bypassed by tests/callers.
+	# Prepare only — does not create BattleState or navigate (0.8.0 contract retained).
 	if not _is_player_data_available():
 		_set_mutation_message(MSG_NO_PARTY)
 		return
@@ -398,6 +458,49 @@ func _on_prepare_pressed() -> void:
 		stage_prepared.emit(_selected_stage_id)
 	else:
 		_set_mutation_message(MSG_PREPARE_OK)
+	_update_enter_battle_button()
+
+
+func _on_enter_battle_pressed() -> void:
+	_enter_press_count_for_tests += 1
+	# Transaction: snapshot → begin → navigate; restore snapshot on nav failure.
+	if not _is_player_data_available():
+		_set_mutation_message(MSG_NO_PARTY)
+		return
+	if not _load_ok:
+		_set_mutation_message(MSG_ENTER_FAIL)
+		return
+	if not is_instance_valid(AdventureState) or not AdventureState.has_prepared_stage():
+		_set_mutation_message(MSG_ENTER_FAIL)
+		return
+	if not is_instance_valid(BattleState):
+		_set_mutation_message(MSG_SESSION_FAIL)
+		return
+	if not _is_party_valid_for_battle():
+		_set_mutation_message(MSG_INVALID_PARTY)
+		return
+
+	var prior: Dictionary = BattleState.capture_session_snapshot()
+	var begin: Dictionary = BattleState.begin_from_prepared_stage()
+	if not bool(begin.get("ok", false)):
+		BattleState.restore_session_snapshot(prior)
+		_set_mutation_message(MSG_SESSION_FAIL)
+		return
+
+	var nav_ok: bool = _navigate_to_battle_for_enter()
+	if not nav_ok:
+		BattleState.restore_session_snapshot(prior)
+		_set_mutation_message(MSG_NAV_FAIL)
+		return
+
+	_set_mutation_message(MSG_ENTER_OK)
+	battle_entered.emit(BattleState.get_stage_id())
+
+
+func _navigate_to_battle_for_enter() -> bool:
+	if _enter_nav_result_override_for_tests is bool:
+		return bool(_enter_nav_result_override_for_tests)
+	return NavigationState.navigate_to(ScreenRegistry.SCREEN_BATTLE, true)
 
 
 func _on_prepared_stage_changed(_area_id: StringName, _stage_id: StringName) -> void:
@@ -407,6 +510,7 @@ func _on_prepared_stage_changed(_area_id: StringName, _stage_id: StringName) -> 
 	_update_detail()
 	_rebuild_stage_grid()
 	_update_prepare_button()
+	_update_enter_battle_button()
 
 
 func _on_player_profile_changed(_revision: int) -> void:
@@ -415,6 +519,7 @@ func _on_player_profile_changed(_revision: int) -> void:
 	# Party summary only; do not rebuild catalog or change stage selection.
 	_update_party_summary()
 	_update_prepare_button()
+	_update_enter_battle_button()
 
 
 func _set_mutation_message(text: String) -> void:
@@ -467,6 +572,10 @@ func get_back_button() -> Button:
 
 func get_prepare_button() -> Button:
 	return _prepare_button
+
+
+func get_enter_battle_button() -> Button:
+	return _enter_battle_button
 
 
 func get_body_scroll() -> ScrollContainer:
@@ -578,12 +687,24 @@ func press_prepare_for_test() -> void:
 	_on_prepare_pressed()
 
 
+func press_enter_battle_for_test() -> void:
+	_on_enter_battle_pressed()
+
+
 func reset_prepare_refresh_count_for_tests() -> void:
 	_prepare_refresh_count_for_tests = 0
 
 
 func get_prepare_refresh_count_for_tests() -> int:
 	return _prepare_refresh_count_for_tests
+
+
+func reset_enter_press_count_for_tests() -> void:
+	_enter_press_count_for_tests = 0
+
+
+func get_enter_press_count_for_tests() -> int:
+	return _enter_press_count_for_tests
 
 
 func reset_party_summary_refresh_count_for_tests() -> void:
@@ -596,6 +717,8 @@ func get_party_summary_refresh_count_for_tests() -> int:
 
 func set_stage_catalog_override_for_tests(result: Dictionary) -> void:
 	_stage_catalog_override_for_tests = result.duplicate(true)
+	if _ready_done and _configured:
+		_reload_all()
 
 
 func clear_stage_catalog_override_for_tests() -> void:
@@ -604,10 +727,26 @@ func clear_stage_catalog_override_for_tests() -> void:
 
 func set_player_data_available_override_for_tests(available: bool) -> void:
 	_player_data_available_override_for_tests = available
+	_update_prepare_button()
+	_update_enter_battle_button()
 
 
 func clear_player_data_available_override_for_tests() -> void:
 	_player_data_available_override_for_tests = null
+	_update_prepare_button()
+	_update_enter_battle_button()
+
+
+func set_enter_nav_result_override_for_tests(ok: bool) -> void:
+	_enter_nav_result_override_for_tests = ok
+
+
+func clear_enter_nav_result_override_for_tests() -> void:
+	_enter_nav_result_override_for_tests = null
+
+
+func is_enter_battle_enabled() -> bool:
+	return _enter_battle_button != null and not _enter_battle_button.disabled
 
 
 func ensure_control_visible_for_test(control: Control) -> void:

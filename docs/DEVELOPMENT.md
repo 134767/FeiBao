@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.8.0**
+- **App version:** **0.9.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -71,9 +71,15 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 
 ## Adventure Stage Selection (0.8.0)
 
-- StageCatalog development seeds; AdventureState prepare only (no battle)
+- StageCatalog development seeds; AdventureState prepare context
 - Dedicated AdventureScreen; stage grid columns 2/2/4
 - See `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`
+
+## Battle Session Shell (0.9.0)
+
+- BattleState memory-only; BattleScreen shell (no real combat)
+- Adventure: prepare stage, then enter battle (separate CTA, transactional nav)
+- See `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`
 
 ## Git Branch & PR Rules
 

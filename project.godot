@@ -23,6 +23,7 @@ GameConfig="*res://autoload/game_config.gd"
 NavigationState="*res://autoload/navigation_state.gd"
 PlayerData="*res://autoload/player_data.gd"
 AdventureState="*res://autoload/adventure_state.gd"
+BattleState="*res://autoload/battle_state.gd"
 
 [display]
 
