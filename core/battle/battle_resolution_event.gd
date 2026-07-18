@@ -11,6 +11,17 @@ const TYPE_CASCADE_COMPLETED: StringName = &"cascade_completed"
 const TYPE_TURN_COMPLETED: StringName = &"turn_completed"
 const TYPE_SWAP_REJECTED: StringName = &"swap_rejected"
 
+const KNOWN_TYPES: Array[StringName] = [
+	TYPE_SWAP,
+	TYPE_SWAP_REJECTED,
+	TYPE_MATCH_FOUND,
+	TYPE_CELLS_CLEARED,
+	TYPE_GRAVITY_APPLIED,
+	TYPE_CELLS_REFILLED,
+	TYPE_CASCADE_COMPLETED,
+	TYPE_TURN_COMPLETED,
+]
+
 
 static func make_swap(from_xy: Vector2i, to_xy: Vector2i) -> Dictionary:
 	return {
@@ -94,7 +105,79 @@ static func duplicate_events(events: Array) -> Array:
 	return out
 
 
-## Deterministic deep equality — no Dictionary string conversion.
+## Strict schema validation for snapshot restore. Fail closed on any illegal event.
+static func validate_events(events: Variant) -> Dictionary:
+	if events == null:
+		return {"ok": true, "error": ""}
+	if not (events is Array):
+		return {"ok": false, "error": "events must be Array"}
+	var arr: Array = events as Array
+	for i in arr.size():
+		var one: Dictionary = validate_event(arr[i])
+		if not bool(one.get("ok", false)):
+			return {
+				"ok": false,
+				"error": "event[%d]: %s" % [i, str(one.get("error", "invalid"))],
+			}
+	return {"ok": true, "error": ""}
+
+
+static func validate_event(event: Variant) -> Dictionary:
+	if not (event is Dictionary):
+		return {"ok": false, "error": "event is not Dictionary"}
+	var d: Dictionary = event as Dictionary
+	if not d.has("type"):
+		return {"ok": false, "error": "missing type"}
+	var t: StringName = d.get("type", &"") as StringName
+	if not KNOWN_TYPES.has(t):
+		return {"ok": false, "error": "unknown event type"}
+	match t:
+		TYPE_SWAP:
+			return _require_xy_pair(d, false)
+		TYPE_SWAP_REJECTED:
+			var base: Dictionary = _require_xy_pair(d, false)
+			if not bool(base.get("ok", false)):
+				return base
+			if not d.has("reason") or typeof(d.get("reason")) != TYPE_STRING:
+				return {"ok": false, "error": "swap_rejected requires string reason"}
+			return {"ok": true, "error": ""}
+		TYPE_MATCH_FOUND:
+			if not d.has("cascade_index") or int(d.get("cascade_index", -1)) < 1:
+				return {"ok": false, "error": "match_found requires cascade_index >= 1"}
+			return _require_xy_list(d.get("matched_cells", null), "matched_cells")
+		TYPE_CELLS_CLEARED:
+			if not d.has("cascade_index") or int(d.get("cascade_index", -1)) < 1:
+				return {"ok": false, "error": "cells_cleared requires cascade_index >= 1"}
+			var cells_ok: Dictionary = _require_xy_list(d.get("cells", null), "cells")
+			if not bool(cells_ok.get("ok", false)):
+				return cells_ok
+			return _require_kind_list(d.get("orb_kinds", null), "orb_kinds", true)
+		TYPE_GRAVITY_APPLIED:
+			return _require_movements(d.get("movements", null))
+		TYPE_CELLS_REFILLED:
+			var pos_ok: Dictionary = _require_xy_list(d.get("positions", null), "positions")
+			if not bool(pos_ok.get("ok", false)):
+				return pos_ok
+			return _require_kind_list(d.get("kinds", null), "kinds", true)
+		TYPE_CASCADE_COMPLETED:
+			if int(d.get("cascade_index", -1)) < 1:
+				return {"ok": false, "error": "cascade_completed requires cascade_index >= 1"}
+			if int(d.get("cleared_cell_count", -1)) < 0:
+				return {"ok": false, "error": "cascade_completed requires non-negative cleared_cell_count"}
+			return {"ok": true, "error": ""}
+		TYPE_TURN_COMPLETED:
+			if int(d.get("turn_count", -1)) < 0:
+				return {"ok": false, "error": "turn_completed requires non-negative turn_count"}
+			if int(d.get("cascade_count", -1)) < 0:
+				return {"ok": false, "error": "turn_completed requires non-negative cascade_count"}
+			if int(d.get("cleared_cell_count", -1)) < 0:
+				return {"ok": false, "error": "turn_completed requires non-negative cleared_cell_count"}
+			return {"ok": true, "error": ""}
+		_:
+			return {"ok": false, "error": "unknown event type"}
+
+
+## Deterministic deep equality — no Dictionary string conversion; unknown types never equal.
 static func events_equal(a: Array, b: Array) -> bool:
 	if a.size() != b.size():
 		return false
@@ -105,7 +188,10 @@ static func events_equal(a: Array, b: Array) -> bool:
 
 
 static func event_equal(a: Variant, b: Variant) -> bool:
-	if not (a is Dictionary) or not (b is Dictionary):
+	# Both must pass schema and match field-by-field.
+	var va: Dictionary = validate_event(a)
+	var vb: Dictionary = validate_event(b)
+	if not bool(va.get("ok", false)) or not bool(vb.get("ok", false)):
 		return false
 	var da: Dictionary = a as Dictionary
 	var db: Dictionary = b as Dictionary
@@ -150,23 +236,78 @@ static func event_equal(a: Variant, b: Variant) -> bool:
 				and int(da.get("cleared_cell_count", -1)) == int(db.get("cleared_cell_count", -2))
 			)
 		_:
-			# Unknown type: compare fixed key set without stringification of whole dict.
-			var keys_a: Array = da.keys()
-			var keys_b: Array = db.keys()
-			keys_a.sort()
-			keys_b.sort()
-			if keys_a.size() != keys_b.size():
-				return false
-			for i in keys_a.size():
-				if str(keys_a[i]) != str(keys_b[i]):
-					return false
-				if str(da[keys_a[i]]) != str(db[keys_b[i]]):
-					return false
-			return true
+			# No unknown-type string fallback — unknown never equal.
+			return false
+
+
+static func _require_xy_pair(d: Dictionary, _unused: bool) -> Dictionary:
+	if not d.has("from") or not d.has("to"):
+		return {"ok": false, "error": "missing from/to"}
+	if not _is_xy_dict(d.get("from")):
+		return {"ok": false, "error": "invalid from coordinate"}
+	if not _is_xy_dict(d.get("to")):
+		return {"ok": false, "error": "invalid to coordinate"}
+	return {"ok": true, "error": ""}
+
+
+static func _require_xy_list(raw: Variant, field: String) -> Dictionary:
+	if not (raw is Array):
+		return {"ok": false, "error": "%s must be Array" % field}
+	var arr: Array = raw as Array
+	for item in arr:
+		if not _is_xy_dict(item):
+			return {"ok": false, "error": "%s contains invalid coordinate" % field}
+	return {"ok": true, "error": ""}
+
+
+static func _require_kind_list(raw: Variant, field: String, allow_empty_list: bool) -> Dictionary:
+	if not (raw is Array):
+		return {"ok": false, "error": "%s must be Array" % field}
+	var arr: Array = raw as Array
+	if not allow_empty_list and arr.is_empty():
+		return {"ok": false, "error": "%s must not be empty" % field}
+	for item in arr:
+		var k: StringName = item as StringName
+		if not BattleOrbKind.is_valid(k):
+			return {"ok": false, "error": "%s contains invalid orb kind" % field}
+	return {"ok": true, "error": ""}
+
+
+static func _require_movements(raw: Variant) -> Dictionary:
+	if not (raw is Array):
+		return {"ok": false, "error": "movements must be Array"}
+	var arr: Array = raw as Array
+	for item in arr:
+		if not (item is Dictionary):
+			return {"ok": false, "error": "movement entry not Dictionary"}
+		var d: Dictionary = item as Dictionary
+		if not _is_xy_dict(d.get("from")) or not _is_xy_dict(d.get("to")):
+			return {"ok": false, "error": "movement from/to invalid"}
+	return {"ok": true, "error": ""}
+
+
+static func _is_xy_dict(v: Variant) -> bool:
+	if not (v is Dictionary):
+		return false
+	var d: Dictionary = v as Dictionary
+	if not d.has("x") or not d.has("y"):
+		return false
+	# Must be integral coordinates (reject fractional strings silently coerced).
+	var x: Variant = d.get("x")
+	var y: Variant = d.get("y")
+	if typeof(x) != TYPE_INT and typeof(x) != TYPE_FLOAT:
+		return false
+	if typeof(y) != TYPE_INT and typeof(y) != TYPE_FLOAT:
+		return false
+	if typeof(x) == TYPE_FLOAT and float(x) != floor(float(x)):
+		return false
+	if typeof(y) == TYPE_FLOAT and float(y) != floor(float(y)):
+		return false
+	return true
 
 
 static func _xy_dict_eq(a: Variant, b: Variant) -> bool:
-	if not (a is Dictionary) or not (b is Dictionary):
+	if not _is_xy_dict(a) or not _is_xy_dict(b):
 		return false
 	var da: Dictionary = a as Dictionary
 	var db: Dictionary = b as Dictionary

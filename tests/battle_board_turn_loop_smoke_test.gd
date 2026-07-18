@@ -530,6 +530,7 @@ func _run_event_equality_tests() -> void:
 		BattleResolutionEvent.make_gravity_applied([{"from_x": 0, "from_y": 1, "to_x": 0, "to_y": 4}]),
 	]
 	var b: Array = BattleResolutionEvent.duplicate_events(a)
+	_assert_true("eveq_valid", bool(BattleResolutionEvent.validate_events(a).get("ok", false)))
 	_assert_true("eveq_same", BattleResolutionEvent.events_equal(a, b))
 	var mut_xy: Array = BattleResolutionEvent.duplicate_events(a)
 	(mut_xy[1] as Dictionary)["matched_cells"] = [{"x": 9, "y": 9}]
@@ -542,6 +543,19 @@ func _run_event_equality_tests() -> void:
 		{"from": {"x": 0, "y": 4}, "to": {"x": 0, "y": 1}},
 	]
 	_assert_true("eveq_move_diff", BattleResolutionEvent.events_equal(a, mut_move) == false)
+	# Unknown type never equal / never valid.
+	var unk: Array = [{"type": &"not_a_real_event", "payload": 1}]
+	_assert_true("eveq_unk_invalid", bool(BattleResolutionEvent.validate_events(unk).get("ok", true)) == false)
+	_assert_true("eveq_unk_not_equal", BattleResolutionEvent.events_equal(a, unk) == false)
+	_assert_true("eveq_unk_self", BattleResolutionEvent.events_equal(unk, unk) == false)
+	# Illegal kind in clear event.
+	var bad_kind_ev: Array = [
+		BattleResolutionEvent.make_cells_cleared(1, [{"x": 0, "y": 0}], [&"not_an_orb"]),
+	]
+	_assert_true(
+		"eveq_bad_kind_invalid",
+		bool(BattleResolutionEvent.validate_events(bad_kind_ev).get("ok", true)) == false
+	)
 	print("[INFO] event equality tests passed")
 
 
@@ -638,6 +652,36 @@ func _run_runtime_snapshot_tests() -> void:
 	bad_rng["rng_state"] = 0
 	_assert_true("rt_bad_rng", bool(BattleRuntime.restore_runtime_snapshot(bad_rng).get("ok", true)) == false)
 
+	# Illegal event snapshot fail closed — preserve runtime domain exact.
+	var before_ev: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	var bad_ev: Dictionary = before_ev.duplicate(true)
+	bad_ev["last_resolution_events"] = [{"type": &"unknown_type", "x": 1}]
+	var bad_ev_res: Dictionary = BattleRuntime.restore_runtime_snapshot(bad_ev)
+	_assert_true("rt_bad_events_reject", bool(bad_ev_res.get("ok", true)) == false)
+	_assert_true("rt_bad_events_board", _cells_eq(before_ev.get("board_cells", []), BattleRuntime.get_board_cells()))
+	_assert_eq("rt_bad_events_rng", BattleRuntime.get_rng_state(), int(before_ev.get("rng_state", -1)))
+	_assert_eq("rt_bad_events_turn", BattleRuntime.get_turn_count(), int(before_ev.get("turn_count", -1)))
+	_assert_eq("rt_bad_events_phase", str(BattleRuntime.get_phase()), str(before_ev.get("phase", &"")))
+	_assert_true(
+		"rt_bad_events_queue",
+		BattleResolutionEvent.events_equal(
+			before_ev.get("last_resolution_events", []) as Array,
+			BattleRuntime.get_last_resolution_events()
+		)
+	)
+	var bad_ev2: Dictionary = before_ev.duplicate(true)
+	bad_ev2["last_resolution_events"] = [
+		{"type": &"cells_cleared", "cascade_index": 1, "cells": [{"x": 0, "y": 0}], "orb_kinds": [&"bogus"]},
+	]
+	_assert_true(
+		"rt_bad_kind_events_reject",
+		bool(BattleRuntime.restore_runtime_snapshot(bad_ev2).get("ok", true)) == false
+	)
+	_assert_true(
+		"rt_bad_kind_events_board",
+		_cells_eq(before_ev.get("board_cells", []), BattleRuntime.get_board_cells())
+	)
+
 	# Canonical inactive restore after clear
 	var clr: Dictionary = BattleRuntime.clear_runtime()
 	_assert_true("rt_clear", bool(clr.get("changed", false)))
@@ -692,31 +736,50 @@ func _run_binding_party_leader_tests() -> void:
 	_assert_true("bind_board_kept", _cells_eq(board_a, BattleRuntime.get_board_cells()))
 	_assert_eq("bind_rng_kept", BattleRuntime.get_rng_state(), rng_a)
 	_assert_eq("bind_turn_kept", BattleRuntime.get_turn_count(), turn_a)
-	# Different leader (same area/stage via reordering is hard); clear runtime and test leader via party index.
+	# Same area/stage, alternate leader: move partner_a to index 0 while runtime stays active.
 	BattleRuntime.clear_runtime()
 	BattleState.clear_session()
-	# Leader change: party [partner_a, feibao_dev] would make leader partner_a
 	PlayerData.initialize()
 	_reset_domain()
 	PlayerData.grant_character(&"partner_a")
 	PlayerData.add_party_member(&"partner_a")
-	# Default party is feibao + partner after add; leader index 0 = feibao
 	AdventureState.prepare_stage(&"dev_stage_beginner_01")
 	BattleState.begin_from_prepared_stage()
-	BattleRuntime.begin_from_battle_session()
+	var r_lead: Dictionary = BattleRuntime.begin_from_battle_session()
+	_assert_true("bind_leader_begin", bool(r_lead.get("ok", false)))
 	var leader_a: StringName = BattleRuntime.get_session_leader_character_id()
-	# Change state to different composition same stage
+	var party_a: Array[StringName] = BattleRuntime.get_session_party_character_ids()
+	_assert_eq("bind_leader_a_is_index0", str(leader_a), str(party_a[0]))
+	var board_lead: Array[StringName] = BattleRuntime.get_board_cells()
+	var rng_lead: int = BattleRuntime.get_rng_state()
+	var turn_lead: int = BattleRuntime.get_turn_count()
+	var area_lead: StringName = BattleRuntime.get_session_area_id()
+	var stage_lead: StringName = BattleRuntime.get_session_stage_id()
+	# Rebuild BattleState with same area/stage but partner_a as leader (index 0).
 	BattleState.clear_session()
-	PlayerData.remove_party_member(&"partner_a")
-	AdventureState.prepare_stage(&"dev_stage_beginner_01")
-	BattleState.begin_from_prepared_stage()
+	var move: Dictionary = PlayerData.move_party_member(&"partner_a", 0)
+	_assert_true("bind_move_partner_ok", bool(move.get("ok", false)))
+	_assert_eq("bind_new_leader", str(PlayerData.get_party_leader_character_id()), "partner_a")
 	_assert_true(
-		"bind_leader_or_party_diff",
-		str(BattleState.get_leader_character_id()) == str(leader_a)
-		and BattleState.get_party_character_ids().size() == 1
+		"bind_leader_differs",
+		str(PlayerData.get_party_leader_character_id()) != str(leader_a)
 	)
-	var r3: Dictionary = BattleRuntime.begin_from_battle_session()
-	_assert_true("bind_diff_party_size_reject", bool(r3.get("ok", true)) == false)
+	AdventureState.prepare_stage(&"dev_stage_beginner_01")
+	var begin_lead: Dictionary = BattleState.begin_from_prepared_stage()
+	_assert_true("bind_state_alt_leader", bool(begin_lead.get("ok", false)))
+	_assert_eq("bind_state_same_stage", str(BattleState.get_stage_id()), str(stage_lead))
+	_assert_eq("bind_state_same_area", str(BattleState.get_area_id()), str(area_lead))
+	_assert_eq("bind_state_leader_partner", str(BattleState.get_leader_character_id()), "partner_a")
+	var r_alt: Dictionary = BattleRuntime.begin_from_battle_session()
+	_assert_true("bind_alt_leader_reject", bool(r_alt.get("ok", true)) == false)
+	_assert_true("bind_alt_board_kept", _cells_eq(board_lead, BattleRuntime.get_board_cells()))
+	_assert_eq("bind_alt_rng_kept", BattleRuntime.get_rng_state(), rng_lead)
+	_assert_eq("bind_alt_turn_kept", BattleRuntime.get_turn_count(), turn_lead)
+	_assert_eq("bind_alt_runtime_leader_unchanged", str(BattleRuntime.get_session_leader_character_id()), str(leader_a))
+	_assert_true(
+		"bind_alt_runtime_party_unchanged",
+		_party_eq(party_a, BattleRuntime.get_session_party_character_ids())
+	)
 	print("[INFO] binding party leader tests passed")
 
 
@@ -940,21 +1003,21 @@ func _probe_board_layout(size: Vector2i) -> void:
 	var leave: Button = screen.call("get_leave_button") as Button
 	_assert_true("ly_%s_back_h" % tag, back != null and back.get_global_rect().size.y >= 48.0)
 	_assert_true("ly_%s_leave_h" % tag, leave != null and leave.get_global_rect().size.y >= 48.0)
-	# Reachability via ensure_control_visible + rect intersection with screen.
+	# Reachability: after ensure_control_visible, rect must intersect screen (no size OR).
 	var first: Button = screen.call("get_cell_button", 0, 0) as Button
 	var last: Button = screen.call("get_cell_button", 5, 4) as Button
-	if first != null:
-		screen.call("ensure_control_visible_for_test", first)
-		await _tree.process_frame
-		_assert_true("ly_%s_first_reach" % tag, first.get_global_rect().intersects(screen_rect) or first.get_global_rect().size.y >= 48.0)
-	if last != null:
-		screen.call("ensure_control_visible_for_test", last)
-		await _tree.process_frame
-		_assert_true("ly_%s_last_reach" % tag, last.get_global_rect().intersects(screen_rect) or last.get_global_rect().size.y >= 48.0)
-	if leave != null:
-		screen.call("ensure_control_visible_for_test", leave)
-		await _tree.process_frame
-		_assert_true("ly_%s_leave_reach" % tag, leave.get_global_rect().intersects(screen_rect) or leave.get_global_rect().size.y >= 48.0)
+	_assert_true("ly_%s_first_present" % tag, first != null)
+	_assert_true("ly_%s_last_present" % tag, last != null)
+	_assert_true("ly_%s_leave_present" % tag, leave != null)
+	screen.call("ensure_control_visible_for_test", first)
+	await _tree.process_frame
+	_assert_true("ly_%s_first_reach" % tag, first.get_global_rect().intersects(screen_rect))
+	screen.call("ensure_control_visible_for_test", last)
+	await _tree.process_frame
+	_assert_true("ly_%s_last_reach" % tag, last.get_global_rect().intersects(screen_rect))
+	screen.call("ensure_control_visible_for_test", leave)
+	await _tree.process_frame
+	_assert_true("ly_%s_leave_reach" % tag, leave.get_global_rect().intersects(screen_rect))
 	# Selected visible
 	BattleRuntime.select_cell(1, 1)
 	screen.call("configure_screen", &"battle")
@@ -1015,31 +1078,29 @@ func _probe_keyboard_input() -> void:
 	await _tree.process_frame
 	_assert_true("kb_up", c00.has_focus())
 
-	# Enter select / deselect via ui_accept
-	BattleRuntime.select_cell(0, 0) # ensure known; then clear
-	BattleRuntime.select_cell(0, 0)
+	# Enter select / deselect via real KEY_ENTER (not pressed.emit, not press_cell_for_test).
+	while BattleRuntime.has_selection():
+		var s: Vector2i = BattleRuntime.get_selected_cell()
+		BattleRuntime.select_cell(s.x, s.y)
 	c00.grab_focus()
 	await _tree.process_frame
-	_send_ui_action(sv, "ui_accept")
+	_assert_true("kb_enter_focus", c00.has_focus())
+	_send_key(sv, KEY_ENTER)
 	await _tree.process_frame
-	# Button pressed path selects; if already selected, deselects — ensure via focus owner press.
-	# Use direct pressed emit after focus for accept simulation of button activate.
-	if c00.has_focus():
-		c00.pressed.emit()
-		await _tree.process_frame
-	var sel_after: Vector2i = BattleRuntime.get_selected_cell()
-	# Toggle: if deselect happened, re-select with another emit.
-	if sel_after.x < 0:
-		c00.pressed.emit()
-		await _tree.process_frame
+	await _tree.process_frame
 	_assert_eq("kb_enter_select", BattleRuntime.get_selected_cell(), Vector2i(0, 0))
-	c00.pressed.emit()
+	_assert_true("kb_enter_still_focus", c00.has_focus())
+	_send_key(sv, KEY_ENTER)
+	await _tree.process_frame
 	await _tree.process_frame
 	_assert_true("kb_enter_deselect", BattleRuntime.has_selection() == false)
 
+	# Space select via real KEY_SPACE
 	c11.grab_focus()
 	await _tree.process_frame
-	c11.pressed.emit()
+	_assert_true("kb_space_focus", c11.has_focus())
+	_send_key(sv, KEY_SPACE)
+	await _tree.process_frame
 	await _tree.process_frame
 	_assert_eq("kb_space_select", BattleRuntime.get_selected_cell(), Vector2i(1, 1))
 
@@ -1074,6 +1135,22 @@ func _send_ui_action(sv: SubViewport, action: String) -> void:
 	release.action = action
 	release.pressed = false
 	sv.push_input(release)
+
+
+## Real physical key press/release into SubViewport (Enter / Space activation path).
+func _send_key(sv: SubViewport, keycode: Key) -> void:
+	var press := InputEventKey.new()
+	press.keycode = keycode
+	press.physical_keycode = keycode
+	press.pressed = true
+	press.echo = false
+	sv.push_input(press, true)
+	var release := InputEventKey.new()
+	release.keycode = keycode
+	release.physical_keycode = keycode
+	release.pressed = false
+	release.echo = false
+	sv.push_input(release, true)
 
 
 func _make_no_match_board() -> Array[StringName]:

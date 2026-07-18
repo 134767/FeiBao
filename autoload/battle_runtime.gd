@@ -253,6 +253,9 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	var next_cascade: int = int(snapshot.get("last_cascade_count", 0))
 	var next_events: Array = []
 	var raw_events: Variant = snapshot.get("last_resolution_events", [])
+	var events_check: Dictionary = BattleResolutionEvent.validate_events(raw_events)
+	if not bool(events_check.get("ok", false)):
+		return _result(false, false, "invalid resolution events: %s" % str(events_check.get("error", "")))
 	if raw_events is Array:
 		next_events = BattleResolutionEvent.duplicate_events(raw_events as Array)
 	var next_msg: String = str(snapshot.get("last_message", ""))
