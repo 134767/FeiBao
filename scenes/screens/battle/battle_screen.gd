@@ -73,6 +73,8 @@ var _leave_count_for_tests: int = 0
 var _leave_nav_result_override_for_tests: Variant = null
 var _cell_buttons: Array[Button] = []
 var _cell_callbacks: Array[Callable] = []
+var _party_summary_cache: String = ""
+var _enemy_summary_cache: String = ""
 
 
 func _ready() -> void:
@@ -283,18 +285,17 @@ func _apply_session_ui() -> void:
 		_leader_label.text = LEADER_LINE_FMT % leader_name
 	if _party_header_label != null:
 		_party_header_label.text = PARTY_HEADER_FMT % party_ids.size()
-	# Names only until runtime encounter is active (HP filled in _apply_combatant_ui).
-	if _party_list_label != null:
-		var lines: PackedStringArray = PackedStringArray()
-		for i in party_ids.size():
-			var nm: String = names[i] if i < names.size() else ""
-			var mark: String = LEADER_MARK if party_ids[i] == leader_id else ""
-			lines.append("%d. %s%s" % [i + 1, nm, mark])
-		_party_list_label.text = "\n".join(lines)
+	# Session-only names cached until runtime combatant UI fills HP cards.
+	var lines: PackedStringArray = PackedStringArray()
+	for i in party_ids.size():
+		var nm: String = names[i] if i < names.size() else ""
+		var mark: String = LEADER_MARK if party_ids[i] == leader_id else ""
+		lines.append("%d. %s%s" % [i + 1, nm, mark])
+	_party_summary_cache = "\n".join(lines)
+	_enemy_summary_cache = ""
 	if _enemy_header_label != null:
 		_enemy_header_label.text = ""
-	if _enemy_list_label != null:
-		_enemy_list_label.text = ""
+	_hide_summary_labels()
 	_sync_leave_controls()
 
 
@@ -329,58 +330,72 @@ func _apply_runtime_ui() -> void:
 func _apply_combatant_ui() -> void:
 	if not is_instance_valid(BattleRuntime) or not BattleRuntime.has_active_runtime():
 		_clear_combatant_cards()
+		_party_summary_cache = ""
+		_enemy_summary_cache = ""
+		_hide_summary_labels()
 		return
 	var party: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
 	if _party_header_label != null:
 		_party_header_label.text = PARTY_HEADER_FMT % party.size()
-	if _party_list_label != null:
-		var plines: PackedStringArray = PackedStringArray()
-		for c in party:
-			var mark: String = LEADER_MARK if c.get_slot_index() == 0 else ""
-			var aff: String = "%s%s" % [BattleAffinity.symbol(c.get_affinity()), BattleAffinity.display_name(c.get_affinity())]
-			plines.append(
-				"%d. %s %s HP %d/%d ATK %d DEF %d%s"
-				% [
-					c.get_slot_index() + 1,
-					c.get_display_name(),
-					aff,
-					c.get_current_hp(),
-					c.get_max_hp(),
-					c.get_attack(),
-					c.get_defense(),
-					mark,
-				]
-			)
-		_party_list_label.text = "\n".join(plines)
+	var plines: PackedStringArray = PackedStringArray()
+	for c in party:
+		var mark: String = LEADER_MARK if c.get_slot_index() == 0 else ""
+		var aff: String = "%s%s" % [BattleAffinity.symbol(c.get_affinity()), BattleAffinity.display_name(c.get_affinity())]
+		plines.append(
+			"%d. %s %s HP %d/%d ATK %d DEF %d%s"
+			% [
+				c.get_slot_index() + 1,
+				c.get_display_name(),
+				aff,
+				c.get_current_hp(),
+				c.get_max_hp(),
+				c.get_attack(),
+				c.get_defense(),
+				mark,
+			]
+		)
+	_party_summary_cache = "\n".join(plines)
 	_rebuild_player_cards(party)
 
 	var enemies: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
 	var aei: int = BattleRuntime.get_active_enemy_index()
 	if _enemy_header_label != null:
 		_enemy_header_label.text = ENEMY_HEADER_FMT % enemies.size()
-	if _enemy_list_label != null:
-		var elines: PackedStringArray = PackedStringArray()
-		for e in enemies:
-			var mark_e: String = ACTIVE_MARK if e.get_slot_index() == aei else ""
-			var aff_e: String = "%s%s" % [BattleAffinity.symbol(e.get_affinity()), BattleAffinity.display_name(e.get_affinity())]
-			var vis: String = ""
-			var er: Dictionary = EnemyCatalog.find_enemy(e.get_source_id())
-			if bool(er.get("ok", false)):
-				vis = str((er.get("enemy", {}) as Dictionary).get("visual_symbol", ""))
-			elines.append(
-				"%d. %s %s %s HP %d/%d%s"
-				% [
-					e.get_slot_index() + 1,
-					vis,
-					e.get_display_name(),
-					aff_e,
-					e.get_current_hp(),
-					e.get_max_hp(),
-					mark_e,
-				]
-			)
-		_enemy_list_label.text = "\n".join(elines)
+	var elines: PackedStringArray = PackedStringArray()
+	for e in enemies:
+		var mark_e: String = ACTIVE_MARK if e.get_slot_index() == aei else ""
+		var aff_e: String = "%s%s" % [BattleAffinity.symbol(e.get_affinity()), BattleAffinity.display_name(e.get_affinity())]
+		var vis: String = ""
+		var er: Dictionary = EnemyCatalog.find_enemy(e.get_source_id())
+		if bool(er.get("ok", false)):
+			vis = str((er.get("enemy", {}) as Dictionary).get("visual_symbol", ""))
+		elines.append(
+			"%d. %s %s %s HP %d/%d%s"
+			% [
+				e.get_slot_index() + 1,
+				vis,
+				e.get_display_name(),
+				aff_e,
+				e.get_current_hp(),
+				e.get_max_hp(),
+				mark_e,
+			]
+		)
+	_enemy_summary_cache = "\n".join(elines)
 	_rebuild_enemy_cards(enemies, aei)
+	_hide_summary_labels()
+
+
+func _hide_summary_labels() -> void:
+	# Cards are the sole visual combatant content; labels keep zero layout height.
+	if _party_list_label != null:
+		_party_list_label.visible = false
+		_party_list_label.text = ""
+		_party_list_label.custom_minimum_size = Vector2(0, 0)
+	if _enemy_list_label != null:
+		_enemy_list_label.visible = false
+		_enemy_list_label.text = ""
+		_enemy_list_label.custom_minimum_size = Vector2(0, 0)
 
 
 func _clear_combatant_cards() -> void:
@@ -398,16 +413,41 @@ func _rebuild_player_cards(party: Array[BattleCombatantModel]) -> void:
 	if _party_cards == null:
 		return
 	_clear_box(_party_cards)
-	for c in party:
-		_party_cards.add_child(_make_player_card(c))
+	# Multi-column cards when wide enough (helps 720×1280 complete-fit).
+	var wide: bool = get_viewport_rect().size.x >= 700.0
+	if wide and party.size() > 1:
+		_party_cards.add_theme_constant_override("separation", 2)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		for c in party:
+			var card: Control = _make_player_card(c)
+			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(card)
+		_party_cards.add_child(row)
+	else:
+		for c in party:
+			_party_cards.add_child(_make_player_card(c))
 
 
 func _rebuild_enemy_cards(enemies: Array[BattleCombatantModel], aei: int) -> void:
 	if _enemy_cards == null:
 		return
 	_clear_box(_enemy_cards)
-	for e in enemies:
-		_enemy_cards.add_child(_make_enemy_card(e, e.get_slot_index() == aei))
+	var wide: bool = get_viewport_rect().size.x >= 700.0
+	if wide and enemies.size() > 1:
+		_enemy_cards.add_theme_constant_override("separation", 2)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		for e in enemies:
+			var card: Control = _make_enemy_card(e, e.get_slot_index() == aei)
+			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(card)
+		_enemy_cards.add_child(row)
+	else:
+		for e in enemies:
+			_enemy_cards.add_child(_make_enemy_card(e, e.get_slot_index() == aei))
 
 
 func _clear_box(box: VBoxContainer) -> void:
@@ -421,16 +461,20 @@ func _make_player_card(c: BattleCombatantModel) -> Control:
 	panel.focus_mode = Control.FOCUS_NONE
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 2)
+	v.add_theme_constant_override("separation", 1)
 	var title := Label.new()
 	var mark: String = LEADER_MARK if c.get_slot_index() == 0 else ""
 	title.text = "%s%s" % [c.get_display_name(), mark]
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.add_theme_font_size_override("font_size", 13)
 	var aff := Label.new()
 	aff.text = "%s %s" % [BattleAffinity.symbol(c.get_affinity()), BattleAffinity.display_name(c.get_affinity())]
+	aff.add_theme_font_size_override("font_size", 12)
 	var hp := Label.new()
-	hp.text = "HP %d / %d" % [c.get_current_hp(), c.get_max_hp()]
+	hp.name = "HpLabel"
+	hp.text = "HP %d/%d" % [c.get_current_hp(), c.get_max_hp()]
 	var bar := ProgressBar.new()
+	bar.name = "HpBar"
 	bar.min_value = 0
 	bar.max_value = maxf(1.0, float(c.get_max_hp()))
 	bar.value = float(c.get_current_hp())
@@ -439,7 +483,10 @@ func _make_player_card(c: BattleCombatantModel) -> Control:
 	bar.focus_mode = Control.FOCUS_NONE
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var stats := Label.new()
+	stats.name = "StatsLabel"
 	stats.text = "ATK %d · DEF %d" % [c.get_attack(), c.get_defense()]
+	title.name = "TitleLabel"
+	aff.name = "AffinityLabel"
 	v.add_child(title)
 	v.add_child(aff)
 	v.add_child(hp)
@@ -454,20 +501,26 @@ func _make_enemy_card(e: BattleCombatantModel, is_active: bool) -> Control:
 	panel.focus_mode = Control.FOCUS_NONE
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 2)
+	v.add_theme_constant_override("separation", 1)
 	var vis: String = "?"
 	var er: Dictionary = EnemyCatalog.find_enemy(e.get_source_id())
 	if bool(er.get("ok", false)):
 		vis = str((er.get("enemy", {}) as Dictionary).get("visual_symbol", "?"))
 	var title := Label.new()
+	title.name = "TitleLabel"
 	var mark: String = ACTIVE_MARK if is_active else ""
 	title.text = "%s %s%s" % [vis, e.get_display_name(), mark]
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.add_theme_font_size_override("font_size", 13)
 	var aff := Label.new()
+	aff.name = "AffinityLabel"
 	aff.text = "%s %s" % [BattleAffinity.symbol(e.get_affinity()), BattleAffinity.display_name(e.get_affinity())]
+	aff.add_theme_font_size_override("font_size", 12)
 	var hp := Label.new()
-	hp.text = "HP %d / %d" % [e.get_current_hp(), e.get_max_hp()]
+	hp.name = "HpLabel"
+	hp.text = "HP %d/%d" % [e.get_current_hp(), e.get_max_hp()]
 	var bar := ProgressBar.new()
+	bar.name = "HpBar"
 	bar.min_value = 0
 	bar.max_value = maxf(1.0, float(e.get_max_hp()))
 	bar.value = float(e.get_current_hp())
@@ -559,6 +612,8 @@ func _clear_content_labels() -> void:
 		_enemy_header_label.text = ""
 	if _enemy_list_label != null:
 		_enemy_list_label.text = ""
+	_party_summary_cache = ""
+	_enemy_summary_cache = ""
 
 
 func _resolve_party_display_names(party_ids: Array[StringName]) -> Dictionary:
@@ -736,7 +791,7 @@ func get_leader_text() -> String:
 
 
 func get_party_list_text() -> String:
-	return _party_list_label.text if _party_list_label != null else ""
+	return _party_summary_cache
 
 
 func get_party_header_text() -> String:
@@ -748,7 +803,66 @@ func get_enemy_header_text() -> String:
 
 
 func get_enemy_list_text() -> String:
-	return _enemy_list_label.text if _enemy_list_label != null else ""
+	return _enemy_summary_cache
+
+
+func get_party_cards_for_tests() -> Array[Control]:
+	return _collect_card_panels(_party_cards)
+
+
+func get_enemy_cards_for_tests() -> Array[Control]:
+	return _collect_card_panels(_enemy_cards)
+
+
+func _collect_card_panels(box: Node) -> Array[Control]:
+	var out: Array[Control] = []
+	if box == null:
+		return out
+	for c in box.get_children():
+		if c is PanelContainer:
+			out.append(c as Control)
+		elif c is HBoxContainer:
+			for inner in c.get_children():
+				if inner is PanelContainer:
+					out.append(inner as Control)
+	return out
+
+
+func get_card_title_for_tests(card: Control) -> String:
+	var n: Node = _find_named(card, "TitleLabel")
+	return (n as Label).text if n is Label else ""
+
+
+func get_card_affinity_for_tests(card: Control) -> String:
+	var n: Node = _find_named(card, "AffinityLabel")
+	return (n as Label).text if n is Label else ""
+
+
+func get_card_hp_label_for_tests(card: Control) -> String:
+	var n: Node = _find_named(card, "HpLabel")
+	return (n as Label).text if n is Label else ""
+
+
+func get_card_progress_bar_for_tests(card: Control) -> ProgressBar:
+	var n: Node = _find_named(card, "HpBar")
+	return n as ProgressBar if n is ProgressBar else null
+
+
+func get_card_stats_for_tests(card: Control) -> String:
+	var n: Node = _find_named(card, "StatsLabel")
+	return (n as Label).text if n is Label else ""
+
+
+func _find_named(root: Node, n: String) -> Node:
+	if root == null:
+		return null
+	if root.name == n:
+		return root
+	for c in root.get_children():
+		var f: Node = _find_named(c, n)
+		if f != null:
+			return f
+	return null
 
 
 func get_shell_status_text() -> String:
@@ -821,6 +935,9 @@ func clear_leave_nav_result_override_for_tests() -> void:
 
 func ensure_control_visible_for_test(control: Control) -> void:
 	if _body_scroll == null or control == null or not is_instance_valid(control):
+		return
+	# Fixed header controls (Back/Leave) are not scroll descendants — skip.
+	if not _body_scroll.is_ancestor_of(control):
 		return
 	if _body_scroll.has_method("ensure_control_visible"):
 		_body_scroll.ensure_control_visible(control)
