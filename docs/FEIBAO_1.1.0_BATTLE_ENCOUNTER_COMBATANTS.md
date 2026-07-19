@@ -73,22 +73,24 @@ Snapshot key `encounter`: `{ player_combatants, enemy_combatants, active_enemy_i
 - Notice: 「戰鬥單位狀態已建立；傷害與敵人行動尚未啟用。」
 - Board turns do **not** change HP or active enemy index (no damage / attack / victory / defeat events)
 
-## Verification evidence (GROK-037)
+## Verification evidence (GROK-038)
 
-Honest test methods used by `tests/battle_encounter_combatant_smoke_test.gd`:
+Honest test methods (`tests/battle_encounter_combatant_smoke_test.gd` + `tests/assertion_integrity_smoke_test.gd`):
 
 | Area | Method |
 |------|--------|
-| Forced accepted turn | Deterministic match-ready fixture via `set_board_cells_for_tests` + exact `try_swap_cells(2,0)/(3,0)`; no natural swap search; unconditional accepted assertions |
-| Adventure enter failures | Real `AdventureScreen` prepare → override catalog → `press_enter_battle_for_test` → state/runtime/revision/fingerprint exact + signal delta 0 → clear override → same screen retry success |
-| Same-frame double enter | Two enter presses before await; transition +1; runtime/board/encounter signals +1 each |
-| Same-frame double leave | Nav-failure restore (marked non-full HP) then two leave presses same frame; signals +1; feature guard blocks second |
-| Snapshot matrix | Illegal encounter container/counts/identity/slots/kind/combatant/cross-state restore fail-closed; valid changed restore exact + documented signal contract |
-| Responsive | Independent SubViewport per size (360×640, 390×844, 720×1280); actual cell/bar sizes; `_rect_fully_within` (not intersects); scroll range = max−page |
-| Keyboard | Real `InputEventAction` / `InputEventKey` via SubViewport `push_input` on max content (3 party + 3 enemies); cards never focus owners |
-| Production safety | SHA-256 fingerprints of `user://feibao/player_profile.json` (+tmp/+bak) unchanged across suite; overrides cleared; fixtures under `user://feibao_tests/` only |
+| Clean-start provenance | GROK-038 starts from clean `3a67aa1…`. GROK-037 started dirty (A gate not satisfied); final GROK-037 work is linear 3 commits only. |
+| Forced accepted turn | Deterministic match-ready fixture + exact `try_swap_cells(2,0)/(3,0)`; unconditional accepted assertions |
+| Adventure enter failures | Real `AdventureScreen`; BattleState / Adventure prepared / Runtime exact snapshots; retry success |
+| Snapshot matrix (3×3) | mist_03 + 3 party / 3 enemies; wrong order with contiguous slots; duplicate slot distinct IDs; inactive Runtime+active encounter with 30 empty cells; all fail-closed + zero signals |
+| Exact cards | Canonical title/affinity/HP/stats/bar equality (no `find`); repeated configure connection counts unchanged |
+| Missing encounter screen | Active BattleState + failed Runtime begin; error exact; 0 cards; 30 disabled cells; retry after override clear |
+| Responsive | Independent SubViewport; horizontal containment; scroll-visible rect reachability (not whole-viewport-only); 720 initial fit without ensure_control_visible |
+| Keyboard | Real Enter/Space with Button.pressed callback counters + selection domain outcomes |
+| Integrity scanner | Separate suite; direct literal/regex only; does not scan itself; pattern-scope only (not full logic proof) |
+| Production cleanup | Overrides match DEFAULT_PATH loads; fixture dir empty; profile schema 2 without encounter/current_hp keys |
 
-Not used as evidence: best-effort swap search, conditional `if accepted`, unit-only enter paths as Adventure transaction proof, custom minimum size as actual rect proof, same BodyScroll as scroll reachability.
+Not claimed: GROK-037 clean-start gate PASS; generic static analysis proves all assertions; external CI PASS.
 
 ## Exclusions
 

@@ -96,7 +96,7 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Atomic board+encounter begin; snapshot includes `encounter` (TYPE_INT combatant fields)
 - Test-only catalog path overrides under `user://feibao_tests/` or `res://tests/fixtures/`
 - BattleScreen: card-only visible combatants (cached summary getters); multi-column cards on wide viewports
-- Evidence suite: forced match-ready turn, Adventure three failure paths, same-frame double enter/leave, SubViewport 360/390/720 matrix
+- Evidence suite (GROK-038): forced turn, Adventure exact transactions, 3×3 snapshot matrix, exact cards, Space key outcomes, SubViewport scroll-visible containment, separate assertion integrity scanner
 - No damage or victory; board turns leave HP / active enemy unchanged
 - See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
