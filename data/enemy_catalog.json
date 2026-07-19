@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "catalog_kind": "development_seed",
+  "enemies": [
+    {
+      "id": "dev_ember_imp",
+      "display_name": "炎小妖（開發樣本）",
+      "summary": "開發用小型火系敵人，僅供遭遇與狀態顯示驗證。",
+      "max_hp": 45,
+      "attack": 9,
+      "defense": 3,
+      "sort_order": 10,
+      "is_development_seed": true
+    },
+    {
+      "id": "dev_tide_wisp",
+      "display_name": "潮霧精（開發樣本）",
+      "summary": "開發用小型水系敵人，非正式戰鬥內容。",
+      "max_hp": 50,
+      "attack": 8,
+      "defense": 4,
+      "sort_order": 20,
+      "is_development_seed": true
+    },
+    {
+      "id": "dev_shadow_mite",
+      "display_name": "影塵蟲（開發樣本）",
+      "summary": "開發用小型暗系敵人，用於多敵人遭遇樣本。",
+      "max_hp": 35,
+      "attack": 11,
+      "defense": 2,
+      "sort_order": 30,
+      "is_development_seed": true
+    }
+  ]
+}

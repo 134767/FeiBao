@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "catalog_kind": "development_seed",
+  "stats": [
+    {
+      "character_id": "feibao_dev",
+      "max_hp": 120,
+      "attack": 14,
+      "defense": 8,
+      "is_development_seed": true
+    },
+    {
+      "character_id": "partner_a",
+      "max_hp": 100,
+      "attack": 12,
+      "defense": 7,
+      "is_development_seed": true
+    },
+    {
+      "character_id": "partner_b",
+      "max_hp": 90,
+      "attack": 15,
+      "defense": 5,
+      "is_development_seed": true
+    },
+    {
+      "character_id": "partner_c",
+      "max_hp": 110,
+      "attack": 10,
+      "defense": 10,
+      "is_development_seed": true
+    },
+    {
+      "character_id": "partner_d",
+      "max_hp": 140,
+      "attack": 9,
+      "defense": 12,
+      "is_development_seed": true
+    },
+    {
+      "character_id": "partner_e",
+      "max_hp": 85,
+      "attack": 16,
+      "defense": 4,
+      "is_development_seed": true
+    }
+  ]
+}

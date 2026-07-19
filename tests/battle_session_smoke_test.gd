@@ -103,7 +103,7 @@ func _run_session_unit_tests() -> void:
 	PlayerData.initialize()
 	_reset_domain()
 	_assert_true("bs_init_inactive", BattleState.has_active_session() == false)
-	_assert_eq("bs_app_version", FeiBaoConstants.APP_VERSION, "1.0.0")
+	_assert_eq("bs_app_version", FeiBaoConstants.APP_VERSION, "1.1.0")
 	_assert_eq(
 		"bs_path_battle",
 		FeiBaoConstants.PATH_BATTLE_SCREEN,

@@ -1,22 +1,24 @@
-## Battle board + turn-loop screen (1.0.0). Session from BattleState; board truth from BattleRuntime.
+## Battle board + encounter combatant screen (1.1.0). Session from BattleState; board/encounter from BattleRuntime.
 extends Control
 
 signal back_requested
 signal leave_requested
 
-const MSG_SHELL: String = "開發樣本：目前僅有盤面與回合流程"
+const MSG_SHELL: String = "開發樣本：盤面回合＋遭遇單位狀態（尚無傷害）"
 const MSG_NO_SESSION: String = "沒有有效的戰鬥工作階段"
 const MSG_NO_RUNTIME: String = "沒有有效的戰鬥盤面"
 const MSG_CHAR_MISSING: String = "出戰角色定義缺失"
 const MSG_LEAVE: String = "離開戰鬥"
-const SEED_HINT: String = "本頁為戰鬥盤面開發樣本，非正式戰鬥內容。"
-const PARTY_LINE_FMT: String = "%d. %s%s"
+const SEED_HINT: String = "本頁為戰鬥遭遇與單位狀態開發樣本，非正式完整戰鬥內容。"
+const PARTY_LINE_FMT: String = "%d. %s HP %d/%d%s"
+const ENEMY_LINE_FMT: String = "%d. %s HP %d/%d"
 const LEADER_MARK: String = "（領隊）"
 const STAGE_LINE_FMT: String = "關卡：%s"
 const STAGE_NUM_FMT: String = "關卡編號：%d"
 const AREA_LINE_FMT: String = "區域：%s"
 const SUMMARY_LINE_FMT: String = "%s"
 const PARTY_HEADER_FMT: String = "出戰隊伍 %d 人"
+const ENEMY_HEADER_FMT: String = "敵人 %d 隻"
 const LEADER_LINE_FMT: String = "隊長：%s"
 const TURN_FMT: String = "回合：%d"
 const MATCH_FMT: String = "上次消除：%d"
@@ -46,6 +48,8 @@ const ORB_COLORS: Dictionary = {
 @onready var _leader_label: Label = %LeaderLabel
 @onready var _party_header_label: Label = %PartyHeaderLabel
 @onready var _party_list_label: Label = %PartyListLabel
+@onready var _enemy_header_label: Label = %EnemyHeaderLabel
+@onready var _enemy_list_label: Label = %EnemyListLabel
 @onready var _turn_label: Label = %TurnLabel
 @onready var _match_label: Label = %MatchLabel
 @onready var _cascade_label: Label = %CascadeLabel
@@ -117,6 +121,8 @@ func _bind_runtime_signals() -> void:
 			BattleRuntime.board_changed.connect(_on_runtime_board_changed)
 		if not BattleRuntime.runtime_changed.is_connected(_on_runtime_changed):
 			BattleRuntime.runtime_changed.connect(_on_runtime_changed)
+		if BattleRuntime.has_signal("encounter_changed") and not BattleRuntime.encounter_changed.is_connected(_on_runtime_board_changed):
+			BattleRuntime.encounter_changed.connect(_on_runtime_board_changed)
 		_runtime_signals_bound = true
 
 
@@ -126,6 +132,8 @@ func _unbind_runtime_signals() -> void:
 			BattleRuntime.board_changed.disconnect(_on_runtime_board_changed)
 		if BattleRuntime.runtime_changed.is_connected(_on_runtime_changed):
 			BattleRuntime.runtime_changed.disconnect(_on_runtime_changed)
+		if BattleRuntime.has_signal("encounter_changed") and BattleRuntime.encounter_changed.is_connected(_on_runtime_board_changed):
+			BattleRuntime.encounter_changed.disconnect(_on_runtime_board_changed)
 	_runtime_signals_bound = false
 
 
@@ -273,13 +281,18 @@ func _apply_session_ui() -> void:
 		_leader_label.text = LEADER_LINE_FMT % leader_name
 	if _party_header_label != null:
 		_party_header_label.text = PARTY_HEADER_FMT % party_ids.size()
+	# Names only until runtime encounter is active (HP filled in _apply_combatant_ui).
 	if _party_list_label != null:
 		var lines: PackedStringArray = PackedStringArray()
 		for i in party_ids.size():
 			var nm: String = names[i] if i < names.size() else ""
 			var mark: String = LEADER_MARK if party_ids[i] == leader_id else ""
-			lines.append(PARTY_LINE_FMT % [i + 1, nm, mark])
+			lines.append("%d. %s%s" % [i + 1, nm, mark])
 		_party_list_label.text = "\n".join(lines)
+	if _enemy_header_label != null:
+		_enemy_header_label.text = ""
+	if _enemy_list_label != null:
+		_enemy_list_label.text = ""
 	_sync_leave_controls()
 
 
@@ -296,6 +309,7 @@ func _apply_runtime_ui() -> void:
 	if _error_label != null and _error_label.text == MSG_NO_RUNTIME:
 		_hide_error()
 	_paint_board_from_runtime()
+	_apply_combatant_ui()
 	_update_status_labels()
 	var phase: StringName = BattleRuntime.get_phase()
 	var can_input: bool = (
@@ -308,6 +322,32 @@ func _apply_runtime_ui() -> void:
 		var msg: String = BattleRuntime.get_last_message()
 		_mutation_label.text = msg
 		_mutation_label.visible = not msg.is_empty()
+
+
+func _apply_combatant_ui() -> void:
+	if not is_instance_valid(BattleRuntime) or not BattleRuntime.has_active_runtime():
+		return
+	var party: Array[BattleCombatant] = BattleRuntime.get_party_combatants()
+	if _party_header_label != null:
+		_party_header_label.text = PARTY_HEADER_FMT % party.size()
+	if _party_list_label != null:
+		var plines: PackedStringArray = PackedStringArray()
+		for c in party:
+			var mark: String = LEADER_MARK if c.is_leader() else ""
+			plines.append(
+				PARTY_LINE_FMT % [c.get_slot_index() + 1, c.get_display_name(), c.get_current_hp(), c.get_max_hp(), mark]
+			)
+		_party_list_label.text = "\n".join(plines)
+	var enemies: Array[BattleCombatant] = BattleRuntime.get_enemy_combatants()
+	if _enemy_header_label != null:
+		_enemy_header_label.text = ENEMY_HEADER_FMT % enemies.size()
+	if _enemy_list_label != null:
+		var elines: PackedStringArray = PackedStringArray()
+		for e in enemies:
+			elines.append(
+				ENEMY_LINE_FMT % [e.get_slot_index() + 1, e.get_display_name(), e.get_current_hp(), e.get_max_hp()]
+			)
+		_enemy_list_label.text = "\n".join(elines)
 
 
 func _paint_empty_board() -> void:
@@ -382,6 +422,10 @@ func _clear_content_labels() -> void:
 		_party_header_label.text = ""
 	if _party_list_label != null:
 		_party_list_label.text = ""
+	if _enemy_header_label != null:
+		_enemy_header_label.text = ""
+	if _enemy_list_label != null:
+		_enemy_list_label.text = ""
 
 
 func _resolve_party_display_names(party_ids: Array[StringName]) -> Dictionary:
@@ -564,6 +608,14 @@ func get_party_list_text() -> String:
 
 func get_party_header_text() -> String:
 	return _party_header_label.text if _party_header_label != null else ""
+
+
+func get_enemy_header_text() -> String:
+	return _enemy_header_label.text if _enemy_header_label != null else ""
+
+
+func get_enemy_list_text() -> String:
+	return _enemy_list_label.text if _enemy_list_label != null else ""
 
 
 func get_shell_status_text() -> String:

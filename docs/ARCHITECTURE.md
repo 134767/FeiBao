@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 1.0.0** — battle board & turn-loop foundation.
+**Current version: 1.1.0** — battle encounter & combatant foundation.
 
 Does **not** claim production multiplayer, finished combat, or cloud systems.
 
@@ -20,7 +20,8 @@ Does **not** claim production multiplayer, finished combat, or cloud systems.
 | 0.7.0 | Active party formation + profile schema 2 + lazy schema 1 migration |
 | 0.8.0 | Adventure stage selection + StageCatalog + AdventureState preparation |
 | 0.9.0 | Battle session shell + BattleScreen (no real combat) |
-| **1.0.0 (current)** | 6×5 board, BattleRuntime, deterministic turn resolution |
+| 1.0.0 | 6×5 board, BattleRuntime, deterministic turn resolution |
+| **1.1.0 (current)** | Encounter combatants, enemy catalog, party/enemy HP display |
 
 ## Clean-room Principles
 
@@ -54,6 +55,15 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
   ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
 
+## Battle Encounter & Combatants (1.1.0)
+
+- Character combat stats + enemy + stage-encounter catalogs (memory blueprints only).
+- `BattleEncounterModel` inside BattleRuntime; atomic board+encounter begin/snapshot.
+- BattleScreen shows party/enemy HP status; no damage, AI, win/loss, or rewards.
+- PlayerProfile schema remains **2**.
+
+See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`.
+
 ## Battle Board & Turn Loop (1.0.0)
 
 - BattleState = session shell; BattleRuntime = board / RNG / turns / events (memory-only).
@@ -61,7 +71,6 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 - Pure domain: `BattleBoardModel`, `BattleBoardEngine`, resolution event dictionaries.
 - Deterministic seed from session fields; no global RNG / time seed; hard-cap cascade rollback.
 - Enter creates state + runtime; leave clears both with dual-snapshot rollback.
-- No enemies, damage, win/loss, rewards, or board persistence.
 
 See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`.
 

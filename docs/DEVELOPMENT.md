@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **1.0.0**
+- **App version:** **1.1.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -88,6 +88,13 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Global RNG isolation + forced hard-cap fixture + keyboard/responsive rect evidence
 - Enter creates state + runtime; leave clears both with dual rollback
 - See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
+
+## Battle Encounter & Combatants (1.1.0)
+
+- Combat stats / enemy / stage-encounter catalogs; BattleEncounterModel
+- Atomic board+encounter begin; snapshot includes `encounter`
+- BattleScreen party/enemy HP lines; no damage or victory
+- See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
 ## Git Branch & PR Rules
 
