@@ -165,6 +165,7 @@ func _canonical_inactive_runtime_with_encounter(active_enc: Dictionary) -> Dicti
 		"last_match_count": 0,
 		"last_cascade_count": 0,
 		"last_resolution_events": [],
+		"last_combat_events": [],
 		"last_message": "",
 		"encounter": active_enc,
 	}
@@ -352,6 +353,10 @@ func _runtime_exact_1_1(snap: Dictionary) -> bool:
 		return false
 	if not BattleResolutionEvent.events_equal(
 		snap.get("last_resolution_events", []) as Array, BattleRuntime.get_last_resolution_events()
+	):
+		return false
+	if not BattleCombatEvent.events_equal(
+		snap.get("last_combat_events", []) as Array, BattleRuntime.get_last_combat_events()
 	):
 		return false
 	var exp_enc: Dictionary = {"player_combatants": [], "enemy_combatants": [], "active_enemy_index": -1}
@@ -624,15 +629,25 @@ func _run_forced_accepted_turn() -> void:
 	_assert_eq("ft_turn", BattleRuntime.get_turn_count(), turn0 + 1)
 	_assert_true("ft_cleared", int(res.get("cleared_cell_count", 0)) >= 3)
 	_assert_true("ft_cascade", int(res.get("cascade_count", 0)) >= 1)
+	# Players never take damage in 1.2.0 player-attack foundation.
 	_assert_true("ft_players_exact", _combatants_exact(players0, BattleRuntime.get_player_combatants()))
-	_assert_true("ft_enemies_exact", _combatants_exact(enemies0, BattleRuntime.get_enemy_combatants()))
 	_assert_eq("ft_aei", BattleRuntime.get_active_enemy_index(), aei0)
-	_assert_eq("ft_en_sig", int(sigs["en"][0]), int(base["en"]))
-	var events: Array = BattleRuntime.get_last_resolution_events()
-	for e in events:
+	# Active enemy receives deterministic damage from ember match (feibao_dev).
+	var after_enemies: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
+	_assert_eq("ft_enemy_count", after_enemies.size(), enemies0.size())
+	_assert_true("ft_enemy_hp_down", after_enemies[aei0].get_current_hp() < enemies0[aei0].get_current_hp())
+	_assert_true("ft_total_dmg", int(res.get("total_damage", 0)) > 0)
+	_assert_eq("ft_en_sig", int(sigs["en"][0]), int(base["en"]) + 1)
+	var combat: Array = BattleRuntime.get_last_combat_events()
+	_assert_true("ft_combat_nonempty", not combat.is_empty())
+	var board_events: Array = BattleRuntime.get_last_resolution_events()
+	for e in board_events:
 		if e is Dictionary:
 			var t: String = str((e as Dictionary).get("type", ""))
-			_assert_true("ft_no_dmg_%s" % t, t != "damage" and t != "attack" and t != "victory" and t != "defeat")
+			_assert_true(
+				"ft_board_no_victory_%s" % t,
+				t != "victory" and t != "defeat"
+			)
 
 	var after_players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
 	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
@@ -652,8 +667,16 @@ func _run_forced_accepted_turn() -> void:
 	var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", cards[0]) as ProgressBar
 	_assert_true("ft_ui_bar", bar != null)
 	_assert_eq("ft_ui_bar_val", int(bar.value), after_players[0].get_current_hp())
-	# HP unchanged vs pre-turn combatants
+	# Player HP unchanged vs pre-turn combatants
 	_assert_eq("ft_ui_hp_unchanged", after_players[0].get_current_hp(), players0[0].get_current_hp())
+	var enemy_cards: Array = screen.call("get_enemy_cards_for_tests") as Array
+	if not enemy_cards.is_empty():
+		var ehp: String = str(screen.call("get_card_hp_label_for_tests", enemy_cards[0]))
+		_assert_eq(
+			"ft_ui_enemy_hp",
+			ehp,
+			"HP %d/%d" % [after_enemies[0].get_current_hp(), after_enemies[0].get_max_hp()]
+		)
 	screen.queue_free()
 	await _tree.process_frame
 	_disconnect_sigs(sigs)

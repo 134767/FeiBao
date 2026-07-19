@@ -1440,7 +1440,8 @@ func _run_enter_leave_screen_tests() -> void:
 	_assert_true("ui_turn", str(screen.call("get_turn_text")).find("0") >= 0)
 	_assert_true(
 		"ui_shell",
-		str(screen.call("get_shell_status_text")).find("戰鬥單位") >= 0
+		str(screen.call("get_shell_status_text")).find("玩家攻擊") >= 0
+		or str(screen.call("get_shell_status_text")).find("戰鬥單位") >= 0
 		or str(screen.call("get_shell_status_text")).find("盤面") >= 0
 	)
 
@@ -1853,7 +1854,12 @@ func _runtime_exact(snap: Dictionary) -> bool:
 		BattleRuntime.get_last_resolution_events()
 	):
 		return false
-	# 1.1.0 encounter deep equality (canonical inactive when key absent on legacy snaps)
+	if not BattleCombatEvent.events_equal(
+		snap.get("last_combat_events", []) as Array,
+		BattleRuntime.get_last_combat_events()
+	):
+		return false
+	# Encounter deep equality (canonical inactive when key absent on legacy snaps)
 	var expected_enc: Dictionary = {}
 	if snap.has("encounter") and snap.get("encounter") is Dictionary:
 		expected_enc = snap.get("encounter") as Dictionary

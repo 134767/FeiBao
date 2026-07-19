@@ -9,7 +9,7 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	print("=== FeiBao Test Runner (1.1.0) ===")
+	print("=== FeiBao Test Runner (1.2.0) ===")
 	var total_passed: int = 0
 	var total_failed: int = 0
 
@@ -34,6 +34,7 @@ func _run_tests() -> void:
 		"res://tests/battle_session_smoke_test.gd",
 		"res://tests/battle_board_turn_loop_smoke_test.gd",
 		"res://tests/battle_encounter_combatant_smoke_test.gd",
+		"res://tests/player_attack_damage_smoke_test.gd",
 		"res://tests/assertion_integrity_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
