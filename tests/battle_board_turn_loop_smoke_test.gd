@@ -1848,9 +1848,29 @@ func _runtime_exact(snap: Dictionary) -> bool:
 		return false
 	if str(BattleRuntime.get_last_message()) != str(snap.get("last_message", "")):
 		return false
-	return BattleResolutionEvent.events_equal(
+	if not BattleResolutionEvent.events_equal(
 		snap.get("last_resolution_events", []) as Array,
 		BattleRuntime.get_last_resolution_events()
+	):
+		return false
+	# 1.1.0 encounter deep equality (canonical inactive when key absent on legacy snaps)
+	var expected_enc: Dictionary = {}
+	if snap.has("encounter") and snap.get("encounter") is Dictionary:
+		expected_enc = snap.get("encounter") as Dictionary
+	else:
+		expected_enc = {
+			"player_combatants": [],
+			"enemy_combatants": [],
+			"active_enemy_index": -1,
+		}
+	var actual_enc: Dictionary = BattleRuntime.get_encounter_snapshot()
+	var exp_rest: Dictionary = BattleEncounterModel.restore_snapshot(expected_enc)
+	var act_rest: Dictionary = BattleEncounterModel.restore_snapshot(actual_enc)
+	if not bool(exp_rest.get("ok", false)) or not bool(act_rest.get("ok", false)):
+		return false
+	return BattleEncounterModel.equals(
+		exp_rest.get("encounter") as BattleEncounterModel,
+		act_rest.get("encounter") as BattleEncounterModel
 	)
 
 

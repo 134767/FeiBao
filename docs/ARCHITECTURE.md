@@ -58,6 +58,8 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
 ## Battle Encounter & Combatants (1.1.0)
 
 - Character combat stats + enemy + stage-encounter catalogs (memory blueprints only).
+- Catalog numerics: **whole JSON numbers** normalized to int (not claimed as Variant TYPE_INT).
+- Snapshot combatant fields remain **TYPE_INT only**.
 - `BattleEncounterModel` inside BattleRuntime; atomic board+encounter begin/snapshot.
 - BattleScreen shows party/enemy HP status; no damage, AI, win/loss, or rewards.
 - PlayerProfile schema remains **2**.

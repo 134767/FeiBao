@@ -34,6 +34,14 @@ data JSON → catalog parsers → pure combatant/encounter domain → BattleRunt
 
 PlayerProfile remains **schema 2**. Stage presentation catalog remains **schema 1**.
 
+### Catalog numeric contract (WHOLE_JSON_NUMBER)
+
+JSON catalogs cannot reliably distinguish lexical `10` vs `10.0` as different Variant types after parse.
+
+- **Allowed:** finite whole JSON numbers (`10`, `10.0`); normalized to `int` after validation
+- **Rejected:** fractional (`10.5`), bool, String, null, Array, Dictionary, Object, Callable
+- **Runtime / combatant snapshots** still require strict **TYPE_INT** (not whole-float)
+
 ## Domain
 
 - `BattleAffinity` — all / is_valid / display_name / symbol (▲●◆✦■)

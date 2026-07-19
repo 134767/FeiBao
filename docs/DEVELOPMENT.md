@@ -92,8 +92,10 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 ## Battle Encounter & Combatants (1.1.0)
 
 - Combat stats / enemy / stage-encounter catalogs; BattleEncounterModel
-- Atomic board+encounter begin; snapshot includes `encounter`
-- BattleScreen party/enemy HP lines; no damage or victory
+- Catalog fields use whole-JSON-number validation (10 / 10.0 ok; 10.5 / bool / string / null rejected)
+- Atomic board+encounter begin; snapshot includes `encounter` (TYPE_INT combatant fields)
+- Test-only catalog path overrides under `user://feibao_tests/` or `res://tests/fixtures/`
+- BattleScreen party/enemy HP lines + ProgressBars; no damage or victory
 - See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
 ## Git Branch & PR Rules

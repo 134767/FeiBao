@@ -10,9 +10,26 @@ const _ENTRY_KEYS: Array[String] = ["stage_id", "enemy_ids"]
 const MIN_ENEMIES: int = 1
 const MAX_ENEMIES: int = 3
 
+static var _path_override_for_tests: String = ""
+
+
+static func set_default_path_override_for_tests(path: String) -> void:
+	if path.is_empty():
+		_path_override_for_tests = ""
+		return
+	if not (path.begins_with("user://feibao_tests/") or path.begins_with("res://tests/fixtures/")):
+		push_error("StageEncounterCatalog: override path not allowed: %s" % path)
+		return
+	_path_override_for_tests = path
+
+
+static func clear_default_path_override_for_tests() -> void:
+	_path_override_for_tests = ""
+
 
 static func load_default() -> Dictionary:
-	return load_from_path(DEFAULT_PATH)
+	var path: String = DEFAULT_PATH if _path_override_for_tests.is_empty() else _path_override_for_tests
+	return load_from_path(path)
 
 
 static func load_from_path(path: String) -> Dictionary:
@@ -55,7 +72,7 @@ static func _validate_and_build(root: Dictionary) -> Dictionary:
 	for required in root_keys:
 		if not root.has(required):
 			return _fail("missing field '%s'" % required)
-	var schema_res: Dictionary = _parse_strict_int(root["schema_version"], "schema_version")
+	var schema_res: Dictionary = _parse_whole_json_number(root["schema_version"], "schema_version")
 	if not bool(schema_res.get("ok", false)):
 		return _fail(str(schema_res.get("error", "")))
 	if int(schema_res["value"]) != EXPECTED_SCHEMA_VERSION:
@@ -163,15 +180,17 @@ static func _id_ok(id_str: String) -> bool:
 	return regex.search(id_str) != null
 
 
-static func _parse_strict_int(value: Variant, field_name: String) -> Dictionary:
+static func _parse_whole_json_number(value: Variant, field_name: String) -> Dictionary:
 	var t: int = typeof(value)
 	if t == TYPE_BOOL or t == TYPE_STRING or value == null:
-		return {"ok": false, "error": "%s must be TYPE_INT" % field_name, "value": 0}
+		return {"ok": false, "error": "%s must be whole JSON number" % field_name, "value": 0}
+	if t == TYPE_ARRAY or t == TYPE_DICTIONARY or value is Object or value is Callable:
+		return {"ok": false, "error": "%s must be whole JSON number" % field_name, "value": 0}
 	if t != TYPE_INT and t != TYPE_FLOAT:
-		return {"ok": false, "error": "%s must be TYPE_INT" % field_name, "value": 0}
+		return {"ok": false, "error": "%s must be whole JSON number" % field_name, "value": 0}
 	var f: float = float(value)
 	if not is_finite(f) or f != floor(f):
-		return {"ok": false, "error": "%s must be TYPE_INT" % field_name, "value": 0}
+		return {"ok": false, "error": "%s must be whole JSON number" % field_name, "value": 0}
 	return {"ok": true, "value": int(f), "error": ""}
 
 
