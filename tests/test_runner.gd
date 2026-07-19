@@ -34,6 +34,7 @@ func _run_tests() -> void:
 		"res://tests/battle_session_smoke_test.gd",
 		"res://tests/battle_board_turn_loop_smoke_test.gd",
 		"res://tests/battle_encounter_combatant_smoke_test.gd",
+		"res://tests/assertion_integrity_smoke_test.gd",
 		"res://tests/layout_smoke_test.gd",
 	])
 
