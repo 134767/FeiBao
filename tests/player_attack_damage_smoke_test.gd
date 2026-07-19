@@ -949,12 +949,19 @@ func _run_snapshot_matrix_k10() -> void:
 		m11["encounter"] = enc11
 	m11["last_combat_events"] = ce11
 	cases.append(["bad_cleared", m11])
+	# D1: accepted board sequence + empty combat must reject.
+	var d1: Dictionary = before.duplicate(true)
+	d1["last_combat_events"] = []
+	cases.append(["accepted_empty_combat", d1])
+	# D2: positive turn + empty board + empty combat + zero counts must reject.
 	var m12: Dictionary = before.duplicate(true)
 	m12["last_combat_events"] = []
 	m12["last_resolution_events"] = []
 	m12["last_match_count"] = 0
 	m12["last_cascade_count"] = 0
-	# empty combat with empty board is OK if turn still >0? binding empty combat ok.
+	# turn_count remains > 0 from accepted prior turn.
+	_assert_true("k10_m12_turn", int(m12.get("turn_count", 0)) > 0)
+	cases.append(["positive_turn_no_evidence", m12])
 	# combat present board empty:
 	var m13: Dictionary = before.duplicate(true)
 	m13["last_resolution_events"] = []
@@ -1097,6 +1104,36 @@ func _run_snapshot_matrix_k10() -> void:
 		)
 		e5["encounter"] = e5_enc
 		cases.append(["e5_extra_attacker", e5])
+	# D5: target_hp_before / first damage hp_before above enemy max_hp (schema ok, binding reject).
+	var d5: Dictionary = before.duplicate(true)
+	var ce_d5: Array = BattleCombatEvent.duplicate_events(d5.get("last_combat_events", []) as Array)
+	_assert_true("k10_d5_has_ce", ce_d5.size() >= 2)
+	var enc_d5_src: Dictionary = d5.get("encounter") as Dictionary
+	var max_hp_d5: int = int(
+		(((enc_d5_src.get("enemy_combatants") as Array)[0]) as Dictionary).get("max_hp", 40)
+	)
+	var inflated_before: int = max_hp_d5 + 1
+	var sim_hp_d5: int = inflated_before
+	for i in ce_d5.size() - 1:
+		var dmg_d5: Dictionary = ce_d5[i] as Dictionary
+		var calc_d5: int = int(dmg_d5.get("calculated_damage", 1))
+		var act_d5: int = mini(calc_d5, sim_hp_d5)
+		dmg_d5["hp_before"] = sim_hp_d5
+		dmg_d5["actual_damage"] = act_d5
+		dmg_d5["hp_after"] = sim_hp_d5 - act_d5
+		sim_hp_d5 = sim_hp_d5 - act_d5
+	var sum_d5: Dictionary = ce_d5[ce_d5.size() - 1] as Dictionary
+	sum_d5["target_hp_before"] = inflated_before
+	sum_d5["target_hp_after"] = sim_hp_d5
+	sum_d5["total_damage"] = inflated_before - sim_hp_d5
+	sum_d5["target_defeated"] = sim_hp_d5 == 0
+	var schema_d5: Dictionary = BattleCombatEvent.validate_events(ce_d5)
+	_assert_true("k10_d5_schema_ok", bool(schema_d5.get("ok", false)))
+	d5["last_combat_events"] = ce_d5
+	var enc_d5: Dictionary = enc_d5_src.duplicate(true)
+	(((enc_d5.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = sim_hp_d5
+	d5["encounter"] = enc_d5
+	cases.append(["hp_before_above_max", d5])
 	for c in cases:
 		var tag: String = str(c[0])
 		var bad: Dictionary = c[1] as Dictionary
@@ -1105,6 +1142,47 @@ func _run_snapshot_matrix_k10() -> void:
 		_assert_true("k10_%s_exact" % tag, _runtime_exact(before))
 		_assert_sig_zero("k10_%s" % tag, sigs, base)
 	_disconnect_sigs(sigs)
+	# D3: valid initial empty combat (turn 0, empty board + combat events).
+	_seed_solo()
+	_assert_true("k10_d3_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+	var init_snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	_assert_eq("k10_d3_turn0", int(init_snap.get("turn_count", -1)), 0)
+	_assert_true("k10_d3_board_empty", (init_snap.get("last_resolution_events", []) as Array).is_empty())
+	_assert_true("k10_d3_combat_empty", (init_snap.get("last_combat_events", []) as Array).is_empty())
+	var sigs_d3: Dictionary = _connect_sigs()
+	var base_d3: Dictionary = _sig_base(sigs_d3)
+	var r_d3: Dictionary = BattleRuntime.restore_runtime_snapshot(init_snap)
+	_assert_true("k10_d3_ok", bool(r_d3.get("ok", false)))
+	_assert_true("k10_d3_nchg", not bool(r_d3.get("changed", true)))
+	_assert_sig_zero("k10_d3", sigs_d3, base_d3)
+	_disconnect_sigs(sigs_d3)
+	# D4: rejected swap after prior accepted turn — empty combat is legal.
+	_assert_true("k10_d4_set_acc", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
+	_assert_true(
+		"k10_d4_acc",
+		bool(BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0)).get("accepted", false))
+	)
+	_assert_true("k10_d4_set_rej", BattleRuntime.set_board_cells_for_tests(_no_match_board()))
+	var rej_res: Dictionary = BattleRuntime.try_swap_cells(Vector2i(0, 0), Vector2i(1, 0))
+	_assert_true("k10_d4_rej_ok", bool(rej_res.get("ok", false)))
+	_assert_true("k10_d4_rej", not bool(rej_res.get("accepted", true)))
+	var rej_snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	_assert_true("k10_d4_turn", int(rej_snap.get("turn_count", 0)) > 0)
+	_assert_true("k10_d4_combat_empty", (rej_snap.get("last_combat_events", []) as Array).is_empty())
+	var rej_board: Array = rej_snap.get("last_resolution_events", []) as Array
+	_assert_eq("k10_d4_board_n", rej_board.size(), 1)
+	_assert_eq(
+		"k10_d4_board_type",
+		str((rej_board[0] as Dictionary).get("type")),
+		"swap_rejected"
+	)
+	var sigs_d4: Dictionary = _connect_sigs()
+	var base_d4: Dictionary = _sig_base(sigs_d4)
+	var r_d4: Dictionary = BattleRuntime.restore_runtime_snapshot(rej_snap)
+	_assert_true("k10_d4_ok", bool(r_d4.get("ok", false)))
+	_assert_true("k10_d4_nchg", not bool(r_d4.get("changed", true)))
+	_assert_sig_zero("k10_d4", sigs_d4, base_d4)
+	_disconnect_sigs(sigs_d4)
 	# E4: missing second attacker with dual-ember party
 	_seed_dual_ember()
 	_assert_true("k10e4_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
@@ -1214,10 +1292,12 @@ func _run_screen_k11() -> void:
 	_assert_true("k11_zero", ztxt.find("本回合沒有隊員屬性符合消除珠") >= 0)
 	var snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	(((snap.get("encounter") as Dictionary).get("enemy_combatants") as Array)[0] as Dictionary)["current_hp"] = 1
+	# Empty combat requires turn-zero empty evidence (B1), not silent positive-turn skip.
 	snap["last_combat_events"] = []
 	snap["last_resolution_events"] = []
 	snap["last_match_count"] = 0
 	snap["last_cascade_count"] = 0
+	snap["turn_count"] = 0
 	_assert_true("k11_low", bool(BattleRuntime.restore_runtime_snapshot(snap).get("ok", false)))
 	_assert_true("k11_set4", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
 	_assert_true("k11_kill", bool(BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0)).get("accepted", false)))

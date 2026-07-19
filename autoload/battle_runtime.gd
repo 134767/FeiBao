@@ -410,7 +410,7 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		if not enc_bind_err.is_empty():
 			return _result(false, false, enc_bind_err)
 		var combat_bind_err: String = _validate_combat_snapshot_binding(
-			next_combat, next_events, next_enc, next_turn, next_party
+			next_combat, next_events, next_enc, next_turn, next_party, next_match, next_cascade
 		)
 		if not combat_bind_err.is_empty():
 			return _result(false, false, combat_bind_err)
@@ -596,16 +596,53 @@ func _validate_inactive_canonical(
 	return ""
 
 
+## Empty combat is legal only for initial turn-zero state or sole swap_rejected evidence.
+func _validate_empty_combat_snapshot(
+	board_events: Array,
+	turn_count: int,
+	match_count: int,
+	cascade_count: int
+) -> String:
+	# B1: new battle / no accepted turn yet.
+	if board_events.is_empty():
+		if turn_count == 0 and match_count == 0 and cascade_count == 0:
+			return ""
+		# B4: positive turn with no board/combat evidence.
+		if turn_count > 0:
+			return "positive turn requires resolution or rejected-swap evidence"
+		return "empty board requires zero turn/match/cascade for empty combat"
+	# B2: last action was rejected swap (exact single event; counts already schema-checked).
+	if board_events.size() == 1:
+		var sole: StringName = (board_events[0] as Dictionary).get("type") as StringName
+		if sole == BattleResolutionEvent.TYPE_SWAP_REJECTED:
+			if match_count != 0 or cascade_count != 0:
+				return "rejected swap requires zero match/cascade counts"
+			return ""
+	# B3: accepted board sequence requires combat summary.
+	var first_type: StringName = (board_events[0] as Dictionary).get("type") as StringName
+	var last_type: StringName = (
+		board_events[board_events.size() - 1] as Dictionary
+	).get("type") as StringName
+	if (
+		first_type == BattleResolutionEvent.TYPE_SWAP
+		and last_type == BattleResolutionEvent.TYPE_TURN_COMPLETED
+	):
+		return "accepted board sequence requires combat events"
+	return "empty combat invalid for board event sequence"
+
+
 ## Cross-check combat events by full re-simulation matching BattleDamageResolver.
 func _validate_combat_snapshot_binding(
 	combat_events: Array,
 	board_events: Array,
 	enc: BattleEncounterModel,
 	turn_count: int,
-	party: Array[StringName]
+	party: Array[StringName],
+	match_count: int = 0,
+	cascade_count: int = 0
 ) -> String:
 	if combat_events.is_empty():
-		return ""
+		return _validate_empty_combat_snapshot(board_events, turn_count, match_count, cascade_count)
 	if board_events.is_empty():
 		return "combat events require board events"
 	var first_board: StringName = (board_events[0] as Dictionary).get("type") as StringName
@@ -628,6 +665,15 @@ func _validate_combat_snapshot_binding(
 		return "combat target_id != active enemy"
 	if (summary.get("target_hp_after") as int) != active.get_current_hp():
 		return "combat target_hp_after != active enemy current_hp"
+	# C: summary / first damage hp_before must not exceed enemy max_hp.
+	var max_hp: int = active.get_max_hp()
+	if (summary.get("target_hp_before") as int) > max_hp:
+		return "combat target_hp_before exceeds enemy max_hp"
+	if combat_events.size() > 1:
+		var first_dmg: Dictionary = combat_events[0] as Dictionary
+		if (first_dmg.get("type") as StringName) == BattleCombatEvent.TYPE_PLAYER_DAMAGE:
+			if (first_dmg.get("hp_before") as int) > max_hp:
+				return "combat target_hp_before exceeds enemy max_hp"
 
 	var expected: Dictionary = _simulate_expected_combat_events(
 		board_events, enc, party, turn_count, summary.get("target_hp_before") as int
