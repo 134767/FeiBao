@@ -1,263 +1,249 @@
-## Memory-only battle encounter: party + enemy combatants. No damage/AI/victory.
+## Memory-only encounter: player + enemy combatants + active enemy index.
 class_name BattleEncounterModel
 extends RefCounted
 
-var _active: bool = false
-var _stage_id: StringName = &""
-var _area_id: StringName = &""
-var _party: Array[BattleCombatant] = []
-var _enemies: Array[BattleCombatant] = []
+const INACTIVE_ACTIVE_INDEX: int = -1
+
+var _player_combatants: Array[BattleCombatantModel] = []
+var _enemy_combatants: Array[BattleCombatantModel] = []
+var _active_enemy_index: int = INACTIVE_ACTIVE_INDEX
+var _built: bool = false
 
 
-func is_active() -> bool:
-	return _active
-
-
-func get_stage_id() -> StringName:
-	return _stage_id
-
-
-func get_area_id() -> StringName:
-	return _area_id
-
-
-func get_party_combatants() -> Array[BattleCombatant]:
-	var out: Array[BattleCombatant] = []
-	for c in _party:
-		out.append(c.duplicate_combatant())
-	return out
-
-
-func get_enemy_combatants() -> Array[BattleCombatant]:
-	var out: Array[BattleCombatant] = []
-	for c in _enemies:
-		out.append(c.duplicate_combatant())
-	return out
-
-
-func get_party_count() -> int:
-	return _party.size()
-
-
-func get_enemy_count() -> int:
-	return _enemies.size()
+func is_valid() -> bool:
+	return _built and not _player_combatants.is_empty() and not _enemy_combatants.is_empty()
 
 
 func clear() -> void:
-	_active = false
-	_stage_id = &""
-	_area_id = &""
-	_party.clear()
-	_enemies.clear()
+	_player_combatants.clear()
+	_enemy_combatants.clear()
+	_active_enemy_index = INACTIVE_ACTIVE_INDEX
+	_built = false
 
 
-## Build full encounter from stage + party IDs. Fail closed; does not mutate self on failure.
-static func build_from_session(
-	area_id: StringName,
-	stage_id: StringName,
-	party_ids: Array[StringName],
-	leader_id: StringName
-) -> Dictionary:
-	if String(area_id).is_empty() or String(stage_id).is_empty():
-		return {"ok": false, "error": "empty session ids", "encounter": null}
+func get_player_combatants() -> Array[BattleCombatantModel]:
+	var out: Array[BattleCombatantModel] = []
+	for c in _player_combatants:
+		out.append(c.duplicate_model())
+	return out
+
+
+func get_enemy_combatants() -> Array[BattleCombatantModel]:
+	var out: Array[BattleCombatantModel] = []
+	for c in _enemy_combatants:
+		out.append(c.duplicate_model())
+	return out
+
+
+func get_active_enemy_index() -> int:
+	return _active_enemy_index
+
+
+func get_active_enemy() -> BattleCombatantModel:
+	if _active_enemy_index < 0 or _active_enemy_index >= _enemy_combatants.size():
+		return null
+	return _enemy_combatants[_active_enemy_index].duplicate_model()
+
+
+## Build from stage + party IDs. Fail closed without mutating self.
+static func build_from_session(stage_id: StringName, party_ids: Array[StringName]) -> Dictionary:
+	if String(stage_id).is_empty():
+		return {"ok": false, "error": "empty stage_id", "encounter": null}
 	if party_ids.is_empty() or party_ids.size() > 3:
 		return {"ok": false, "error": "invalid party size", "encounter": null}
-	if party_ids[0] != leader_id:
-		return {"ok": false, "error": "leader must be party index 0", "encounter": null}
 
-	var stage_check: Dictionary = StageCatalog.find_stage(stage_id)
-	if not bool(stage_check.get("ok", false)):
+	var stage_res: Dictionary = StageCatalog.find_stage(stage_id)
+	if not bool(stage_res.get("ok", false)):
 		return {"ok": false, "error": "stage not found", "encounter": null}
-	var area_def: StageAreaDefinition = stage_check.get("area") as StageAreaDefinition
-	if area_def == null or area_def.get_id() != area_id:
-		return {"ok": false, "error": "stage/area mismatch", "encounter": null}
 
-	var enc_link: Dictionary = StageEncounterCatalog.find_encounter(stage_id)
-	if not bool(enc_link.get("ok", false)):
+	var link_res: Dictionary = StageEncounterCatalog.find_encounter(stage_id)
+	if not bool(link_res.get("ok", false)):
 		return {"ok": false, "error": "stage encounter missing", "encounter": null}
-	var link: StageEncounterDefinition = enc_link.get("encounter") as StageEncounterDefinition
-	if link == null:
-		return {"ok": false, "error": "stage encounter null", "encounter": null}
+	var link: Dictionary = link_res.get("encounter", {}) as Dictionary
+	var enemy_ids: Array = link.get("enemy_ids", []) as Array
 
-	var char_cat: Dictionary = CharacterCatalog.load_default()
-	if not bool(char_cat.get("ok", false)):
+	var chars: Dictionary = CharacterCatalog.load_default()
+	if not bool(chars.get("ok", false)):
 		return {"ok": false, "error": "character catalog failed", "encounter": null}
 	var char_by_id: Dictionary = {}
-	for item in char_cat.get("characters", []):
-		if item is CharacterDefinition:
-			var cd: CharacterDefinition = item as CharacterDefinition
-			char_by_id[cd.get_id()] = cd
+	for c in chars.get("characters", []):
+		if c is CharacterDefinition:
+			char_by_id[(c as CharacterDefinition).get_id()] = c
 
-	var party: Array[BattleCombatant] = []
+	var players: Array[BattleCombatantModel] = []
+	var seen_p: Dictionary = {}
 	for i in party_ids.size():
-		var cid: StringName = party_ids[i]
-		if not char_by_id.has(cid):
-			return {"ok": false, "error": "party character missing: %s" % str(cid), "encounter": null}
-		var stats_res: Dictionary = CharacterCombatStatsCatalog.find_stats(cid)
+		var pid: StringName = party_ids[i]
+		if seen_p.has(str(pid)):
+			return {"ok": false, "error": "duplicate party id", "encounter": null}
+		seen_p[str(pid)] = true
+		if not char_by_id.has(pid):
+			return {"ok": false, "error": "party character missing", "encounter": null}
+		var stats_res: Dictionary = BattleCharacterStatsCatalog.find_stats(pid)
 		if not bool(stats_res.get("ok", false)):
-			return {"ok": false, "error": "party combat stats missing: %s" % str(cid), "encounter": null}
-		var stats: CharacterCombatStatsDefinition = stats_res.get("stats") as CharacterCombatStatsDefinition
-		var cdef: CharacterDefinition = char_by_id[cid] as CharacterDefinition
-		var is_leader: bool = i == 0
-		party.append(
-			BattleCombatant.new(
-				BattleCombatant.SIDE_PARTY,
-				cid,
-				cdef.get_display_name(),
-				i,
-				stats.get_max_hp(),
-				stats.get_max_hp(),
-				stats.get_attack(),
-				stats.get_defense(),
-				is_leader
-			)
+			return {"ok": false, "error": "battle stats missing: %s" % str(pid), "encounter": null}
+		var st: Dictionary = stats_res.get("stats", {}) as Dictionary
+		var cdef: CharacterDefinition = char_by_id[pid] as CharacterDefinition
+		var cres: Dictionary = BattleCombatantModel.create_player(
+			pid,
+			cdef.get_display_name(),
+			st.get("affinity") as StringName,
+			i,
+			int(st.get("max_hp", 0)),
+			int(st.get("attack", 0)),
+			int(st.get("defense", 0))
 		)
+		if not bool(cres.get("ok", false)):
+			return {"ok": false, "error": str(cres.get("error", "player create failed")), "encounter": null}
+		players.append(cres.get("combatant") as BattleCombatantModel)
 
-	var enemies: Array[BattleCombatant] = []
-	var enemy_ids: Array[StringName] = link.get_enemy_ids()
+	var enemies: Array[BattleCombatantModel] = []
+	var seen_e: Dictionary = {}
 	for i in enemy_ids.size():
-		var eid: StringName = enemy_ids[i]
+		var eid: StringName = enemy_ids[i] as StringName
+		if seen_e.has(str(eid)):
+			return {"ok": false, "error": "duplicate enemy id", "encounter": null}
+		seen_e[str(eid)] = true
 		var eres: Dictionary = EnemyCatalog.find_enemy(eid)
 		if not bool(eres.get("ok", false)):
 			return {"ok": false, "error": "enemy missing: %s" % str(eid), "encounter": null}
-		var edef: EnemyDefinition = eres.get("enemy") as EnemyDefinition
-		enemies.append(
-			BattleCombatant.new(
-				BattleCombatant.SIDE_ENEMY,
-				eid,
-				edef.get_display_name(),
-				i,
-				edef.get_max_hp(),
-				edef.get_max_hp(),
-				edef.get_attack(),
-				edef.get_defense(),
-				false
-			)
+		var ed: Dictionary = eres.get("enemy", {}) as Dictionary
+		var eres2: Dictionary = BattleCombatantModel.create_enemy(
+			eid,
+			str(ed.get("display_name", "")),
+			ed.get("affinity") as StringName,
+			i,
+			int(ed.get("max_hp", 0)),
+			int(ed.get("attack", 0)),
+			int(ed.get("defense", 0))
 		)
+		if not bool(eres2.get("ok", false)):
+			return {"ok": false, "error": str(eres2.get("error", "enemy create failed")), "encounter": null}
+		enemies.append(eres2.get("combatant") as BattleCombatantModel)
 
 	var model := BattleEncounterModel.new()
-	model._active = true
-	model._stage_id = stage_id
-	model._area_id = area_id
-	model._party = party
-	model._enemies = enemies
+	model._player_combatants = players
+	model._enemy_combatants = enemies
+	model._active_enemy_index = 0
+	model._built = true
+	if not model.is_valid():
+		return {"ok": false, "error": "built encounter invalid", "encounter": null}
 	return {"ok": true, "error": "", "encounter": model}
 
 
 func capture_snapshot() -> Dictionary:
-	var party_snaps: Array = []
-	for c in _party:
-		party_snaps.append(c.to_snapshot_dict())
-	var enemy_snaps: Array = []
-	for c in _enemies:
-		enemy_snaps.append(c.to_snapshot_dict())
+	if not _built:
+		return {
+			"player_combatants": [],
+			"enemy_combatants": [],
+			"active_enemy_index": INACTIVE_ACTIVE_INDEX,
+		}
+	var p: Array = []
+	for c in _player_combatants:
+		p.append(c.capture_snapshot())
+	var e: Array = []
+	for c in _enemy_combatants:
+		e.append(c.capture_snapshot())
 	return {
-		"active": _active,
-		"stage_id": _stage_id,
-		"area_id": _area_id,
-		"party": party_snaps,
-		"enemies": enemy_snaps,
+		"player_combatants": p,
+		"enemy_combatants": e,
+		"active_enemy_index": _active_enemy_index,
 	}
 
 
-static func validate_and_restore_snapshot(raw: Variant) -> Dictionary:
+static func restore_snapshot(raw: Variant) -> Dictionary:
 	if not (raw is Dictionary):
-		return {"ok": false, "error": "encounter snapshot not Dictionary", "encounter": null}
+		return {"ok": false, "error": "encounter not Dictionary", "encounter": null}
 	var d: Dictionary = raw as Dictionary
-	var keys: Array[String] = ["active", "stage_id", "area_id", "party", "enemies"]
+	var keys: Array[String] = ["player_combatants", "enemy_combatants", "active_enemy_index"]
 	if d.size() != keys.size():
 		return {"ok": false, "error": "encounter unexpected key set", "encounter": null}
 	for k in keys:
 		if not d.has(k):
-			return {"ok": false, "error": "encounter missing %s" % k, "encounter": null}
+			return {"ok": false, "error": "encounter missing %s" % k}
 
-	if typeof(d.get("active")) != TYPE_BOOL:
-		return {"ok": false, "error": "encounter.active must be bool", "encounter": null}
-	var active: bool = bool(d.get("active"))
+	if typeof(d.get("active_enemy_index")) != TYPE_INT:
+		return {"ok": false, "error": "active_enemy_index must be TYPE_INT", "encounter": null}
+	var aei: int = d.get("active_enemy_index") as int
 
-	var stage_v: Variant = d.get("stage_id")
-	var area_v: Variant = d.get("area_id")
-	if typeof(stage_v) != TYPE_STRING_NAME or typeof(area_v) != TYPE_STRING_NAME:
-		return {"ok": false, "error": "encounter stage/area must be StringName", "encounter": null}
-	var stage_id: StringName = stage_v as StringName
-	var area_id: StringName = area_v as StringName
+	if not (d.get("player_combatants") is Array) or not (d.get("enemy_combatants") is Array):
+		return {"ok": false, "error": "combatant lists must be Array", "encounter": null}
+	var praw: Array = d.get("player_combatants") as Array
+	var eraw: Array = d.get("enemy_combatants") as Array
 
-	if not (d.get("party") is Array) or not (d.get("enemies") is Array):
-		return {"ok": false, "error": "encounter party/enemies must be Array", "encounter": null}
-	var party_raw: Array = d.get("party") as Array
-	var enemy_raw: Array = d.get("enemies") as Array
-
-	if not active:
-		if not String(stage_id).is_empty() or not String(area_id).is_empty():
-			return {"ok": false, "error": "inactive encounter requires empty ids", "encounter": null}
-		if not party_raw.is_empty() or not enemy_raw.is_empty():
-			return {"ok": false, "error": "inactive encounter requires empty combatants", "encounter": null}
+	# Canonical inactive
+	if praw.is_empty() and eraw.is_empty():
+		if aei != INACTIVE_ACTIVE_INDEX:
+			return {"ok": false, "error": "inactive active_enemy_index must be -1", "encounter": null}
 		var empty := BattleEncounterModel.new()
 		empty.clear()
 		return {"ok": true, "error": "", "encounter": empty}
 
-	if String(stage_id).is_empty() or String(area_id).is_empty():
-		return {"ok": false, "error": "active encounter requires ids", "encounter": null}
-	if party_raw.is_empty() or party_raw.size() > 3:
-		return {"ok": false, "error": "active encounter invalid party size", "encounter": null}
-	if enemy_raw.is_empty() or enemy_raw.size() > 3:
-		return {"ok": false, "error": "active encounter invalid enemy size", "encounter": null}
+	if praw.is_empty() or praw.size() > 3:
+		return {"ok": false, "error": "invalid player count", "encounter": null}
+	if eraw.is_empty() or eraw.size() > 3:
+		return {"ok": false, "error": "invalid enemy count", "encounter": null}
+	if aei < 0 or aei >= eraw.size():
+		return {"ok": false, "error": "active_enemy_index out of range", "encounter": null}
 
-	var party: Array[BattleCombatant] = []
-	for i in party_raw.size():
-		var cres: Dictionary = BattleCombatant.from_snapshot_dict(party_raw[i])
-		if not bool(cres.get("ok", false)):
-			return {"ok": false, "error": "party[%d]: %s" % [i, str(cres.get("error", ""))], "encounter": null}
-		var c: BattleCombatant = cres.get("combatant") as BattleCombatant
-		if c.get_side() != BattleCombatant.SIDE_PARTY:
-			return {"ok": false, "error": "party[%d] wrong side" % i, "encounter": null}
+	var players: Array[BattleCombatantModel] = []
+	var seen_p: Dictionary = {}
+	for i in praw.size():
+		var r: Dictionary = BattleCombatantModel.restore_snapshot(praw[i])
+		if not bool(r.get("ok", false)):
+			return {"ok": false, "error": "player[%d]: %s" % [i, str(r.get("error", ""))], "encounter": null}
+		var c: BattleCombatantModel = r.get("combatant") as BattleCombatantModel
+		if c.get_combatant_kind() != BattleCombatantModel.KIND_PLAYER:
+			return {"ok": false, "error": "player[%d] wrong kind" % i, "encounter": null}
 		if c.get_slot_index() != i:
-			return {"ok": false, "error": "party[%d] slot mismatch" % i, "encounter": null}
-		party.append(c)
-	if not party[0].is_leader():
-		return {"ok": false, "error": "party leader required at slot 0", "encounter": null}
+			return {"ok": false, "error": "player[%d] slot not contiguous" % i, "encounter": null}
+		if seen_p.has(str(c.get_source_id())):
+			return {"ok": false, "error": "duplicate player source", "encounter": null}
+		seen_p[str(c.get_source_id())] = true
+		players.append(c)
 
-	var enemies: Array[BattleCombatant] = []
-	for i in enemy_raw.size():
-		var eres: Dictionary = BattleCombatant.from_snapshot_dict(enemy_raw[i])
-		if not bool(eres.get("ok", false)):
-			return {"ok": false, "error": "enemies[%d]: %s" % [i, str(eres.get("error", ""))], "encounter": null}
-		var e: BattleCombatant = eres.get("combatant") as BattleCombatant
-		if e.get_side() != BattleCombatant.SIDE_ENEMY:
-			return {"ok": false, "error": "enemies[%d] wrong side" % i, "encounter": null}
+	var enemies: Array[BattleCombatantModel] = []
+	var seen_e: Dictionary = {}
+	for i in eraw.size():
+		var r2: Dictionary = BattleCombatantModel.restore_snapshot(eraw[i])
+		if not bool(r2.get("ok", false)):
+			return {"ok": false, "error": "enemy[%d]: %s" % [i, str(r2.get("error", ""))], "encounter": null}
+		var e: BattleCombatantModel = r2.get("combatant") as BattleCombatantModel
+		if e.get_combatant_kind() != BattleCombatantModel.KIND_ENEMY:
+			return {"ok": false, "error": "enemy[%d] wrong kind" % i, "encounter": null}
 		if e.get_slot_index() != i:
-			return {"ok": false, "error": "enemies[%d] slot mismatch" % i, "encounter": null}
+			return {"ok": false, "error": "enemy[%d] slot not contiguous" % i, "encounter": null}
+		if seen_e.has(str(e.get_source_id())):
+			return {"ok": false, "error": "duplicate enemy source", "encounter": null}
+		seen_e[str(e.get_source_id())] = true
 		enemies.append(e)
 
 	var model := BattleEncounterModel.new()
-	model._active = true
-	model._stage_id = stage_id
-	model._area_id = area_id
-	model._party = party
-	model._enemies = enemies
+	model._player_combatants = players
+	model._enemy_combatants = enemies
+	model._active_enemy_index = aei
+	model._built = true
 	return {"ok": true, "error": "", "encounter": model}
 
 
 static func equals(a: BattleEncounterModel, b: BattleEncounterModel) -> bool:
 	if a == null or b == null:
 		return false
-	if a.is_active() != b.is_active():
+	if a.get_active_enemy_index() != b.get_active_enemy_index():
 		return false
-	if a.get_stage_id() != b.get_stage_id() or a.get_area_id() != b.get_area_id():
-		return false
-	var ap: Array[BattleCombatant] = a.get_party_combatants()
-	var bp: Array[BattleCombatant] = b.get_party_combatants()
+	var ap: Array[BattleCombatantModel] = a.get_player_combatants()
+	var bp: Array[BattleCombatantModel] = b.get_player_combatants()
 	if ap.size() != bp.size():
 		return false
 	for i in ap.size():
-		if not BattleCombatant.equals(ap[i], bp[i]):
+		if not BattleCombatantModel.equals(ap[i], bp[i]):
 			return false
-	var ae: Array[BattleCombatant] = a.get_enemy_combatants()
-	var be: Array[BattleCombatant] = b.get_enemy_combatants()
+	var ae: Array[BattleCombatantModel] = a.get_enemy_combatants()
+	var be: Array[BattleCombatantModel] = b.get_enemy_combatants()
 	if ae.size() != be.size():
 		return false
 	for i in ae.size():
-		if not BattleCombatant.equals(ae[i], be[i]):
+		if not BattleCombatantModel.equals(ae[i], be[i]):
 			return false
 	return true
 
@@ -266,10 +252,15 @@ func assign_from(other: BattleEncounterModel) -> void:
 	clear()
 	if other == null:
 		return
-	_active = other.is_active()
-	_stage_id = other.get_stage_id()
-	_area_id = other.get_area_id()
-	for c in other.get_party_combatants():
-		_party.append(c)
+	for c in other.get_player_combatants():
+		_player_combatants.append(c)
 	for c in other.get_enemy_combatants():
-		_enemies.append(c)
+		_enemy_combatants.append(c)
+	_active_enemy_index = other.get_active_enemy_index()
+	_built = other.is_valid() or (
+		_player_combatants.is_empty() and _enemy_combatants.is_empty() and _active_enemy_index == INACTIVE_ACTIVE_INDEX
+	)
+	if _player_combatants.is_empty() and _enemy_combatants.is_empty():
+		_built = false
+	else:
+		_built = true

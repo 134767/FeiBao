@@ -120,31 +120,30 @@ func get_rng_state() -> int:
 
 
 func has_active_encounter() -> bool:
-	return _encounter != null and _encounter.is_active()
+	return _encounter != null and _encounter.is_valid()
 
 
-func get_party_combatants() -> Array[BattleCombatant]:
-	return _encounter.get_party_combatants()
+func get_player_combatants() -> Array[BattleCombatantModel]:
+	return _encounter.get_player_combatants()
 
 
-func get_enemy_combatants() -> Array[BattleCombatant]:
+func get_enemy_combatants() -> Array[BattleCombatantModel]:
 	return _encounter.get_enemy_combatants()
 
 
-func get_party_combatant_count() -> int:
-	return _encounter.get_party_count()
+func get_active_enemy() -> BattleCombatantModel:
+	return _encounter.get_active_enemy()
 
 
-func get_enemy_combatant_count() -> int:
-	return _encounter.get_enemy_count()
+func get_active_enemy_index() -> int:
+	return _encounter.get_active_enemy_index()
 
 
-func capture_encounter_snapshot() -> Dictionary:
+func get_encounter_snapshot() -> Dictionary:
 	return _encounter.capture_snapshot()
 
 
-## Begin runtime from active BattleState session. Deterministic seed from full session fields.
-## Board + encounter are committed atomically (fail closed with no partial active state).
+## Begin runtime from active BattleState. Candidate encounter+board then one-shot commit.
 func begin_from_battle_session() -> Dictionary:
 	if not is_instance_valid(BattleState) or not BattleState.has_active_session():
 		return _result(false, false, "no active BattleState session")
@@ -160,39 +159,48 @@ func begin_from_battle_session() -> Dictionary:
 	if party[0] != leader:
 		return _result(false, false, "leader must be party index 0")
 
-	# Same full session already active → idempotent.
+	# Same full session already active → idempotent (zero signals).
 	if (
 		has_active_runtime()
 		and _session_area_id == area_id
 		and _session_stage_id == stage_id
 		and _party_ids_equal(_session_party_character_ids, party)
 		and _session_leader_character_id == leader
-		and _encounter.is_active()
+		and _encounter.is_valid()
 	):
 		return _result(true, false, "")
 
-	# Different active runtime (including same area/stage but different party/leader) → fail closed.
 	if has_active_runtime():
 		return _result(false, false, "active runtime already exists")
 
-	var seed: int = BattleBoardEngine.derive_seed_from_session(area_id, stage_id, party, leader)
-	var gen: Dictionary = _engine.generate_initial_board(seed)
-	if not bool(gen.get("ok", false)):
-		return _result(false, false, str(gen.get("error", "board generation failed")))
-
-	var enc_res: Dictionary = BattleEncounterModel.build_from_session(area_id, stage_id, party, leader)
+	# 1–5: build candidate encounter (no mutation of self yet)
+	var enc_res: Dictionary = BattleEncounterModel.build_from_session(stage_id, party)
 	if not bool(enc_res.get("ok", false)):
 		return _result(false, false, str(enc_res.get("error", "encounter build failed")))
 	var next_enc: BattleEncounterModel = enc_res.get("encounter") as BattleEncounterModel
-	if next_enc == null or not next_enc.is_active():
-		return _result(false, false, "encounter build returned inactive")
+	if next_enc == null or not next_enc.is_valid():
+		return _result(false, false, "encounter build returned invalid")
 
+	# 6–7: candidate board via isolated engine (do not touch live RNG/board)
+	var seed: int = BattleBoardEngine.derive_seed_from_session(area_id, stage_id, party, leader)
+	var temp_engine := BattleBoardEngine.new()
+	var gen: Dictionary = temp_engine.generate_initial_board(seed)
+	if not bool(gen.get("ok", false)):
+		return _result(false, false, str(gen.get("error", "board generation failed")))
+	var cells: Array = gen.get("cells", []) as Array
+	if cells.size() != BattleBoardModel.CELL_COUNT:
+		return _result(false, false, "invalid board generation size")
+	for k in cells:
+		if not BattleOrbKind.is_valid(k as StringName):
+			return _result(false, false, "invalid board orb kind")
+
+	# 8–9: one-shot commit
 	_active = true
 	_session_area_id = area_id
 	_session_stage_id = stage_id
 	_session_party_character_ids = party.duplicate()
 	_session_leader_character_id = leader
-	_board.set_cells(gen.get("cells", []) as Array)
+	_board.set_cells(cells)
 	_engine.set_rng_state(int(gen.get("rng_state", 1)))
 	_turn_count = 0
 	_last_match_count = 0
@@ -218,15 +226,16 @@ func begin_from_seed_for_tests(seed: int) -> Dictionary:
 	var stage_id: StringName = BattleState.get_stage_id()
 	var party: Array[StringName] = BattleState.get_party_character_ids()
 	var leader: StringName = BattleState.get_leader_character_id()
-	var gen: Dictionary = _engine.generate_initial_board(seed)
-	if not bool(gen.get("ok", false)):
-		return _result(false, false, str(gen.get("error", "board generation failed")))
-	var enc_res: Dictionary = BattleEncounterModel.build_from_session(area_id, stage_id, party, leader)
+	var enc_res: Dictionary = BattleEncounterModel.build_from_session(stage_id, party)
 	if not bool(enc_res.get("ok", false)):
 		return _result(false, false, str(enc_res.get("error", "encounter build failed")))
 	var next_enc: BattleEncounterModel = enc_res.get("encounter") as BattleEncounterModel
-	if next_enc == null or not next_enc.is_active():
-		return _result(false, false, "encounter build returned inactive")
+	if next_enc == null or not next_enc.is_valid():
+		return _result(false, false, "encounter build returned invalid")
+	var temp_engine := BattleBoardEngine.new()
+	var gen: Dictionary = temp_engine.generate_initial_board(seed)
+	if not bool(gen.get("ok", false)):
+		return _result(false, false, str(gen.get("error", "board generation failed")))
 	_active = true
 	_session_area_id = area_id
 	_session_stage_id = stage_id
@@ -314,7 +323,7 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	var next_msg: String = str(snapshot.get("last_message", ""))
 	if not snapshot.has("encounter"):
 		return _result(false, false, "missing encounter")
-	var enc_check: Dictionary = BattleEncounterModel.validate_and_restore_snapshot(snapshot.get("encounter"))
+	var enc_check: Dictionary = BattleEncounterModel.restore_snapshot(snapshot.get("encounter"))
 	if not bool(enc_check.get("ok", false)):
 		return _result(false, false, "invalid encounter: %s" % str(enc_check.get("error", "")))
 	var next_enc: BattleEncounterModel = enc_check.get("encounter") as BattleEncounterModel
@@ -389,8 +398,10 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		)
 		if not inactive_err.is_empty():
 			return _result(false, false, inactive_err)
-		if next_enc.is_active():
+		if next_enc.is_valid():
 			return _result(false, false, "inactive snapshot requires inactive encounter")
+		if next_enc.get_active_enemy_index() != BattleEncounterModel.INACTIVE_ACTIVE_INDEX:
+			return _result(false, false, "inactive encounter active_enemy_index must be -1")
 
 	# Idempotent identical restore (no signals).
 	if (
@@ -470,25 +481,37 @@ func _validate_active_snapshot(
 
 func _validate_encounter_binding(
 	enc: BattleEncounterModel,
-	area: StringName,
+	_area: StringName,
 	stage: StringName,
 	party: Array[StringName],
 	leader: StringName
 ) -> String:
-	if enc == null or not enc.is_active():
+	if enc == null or not enc.is_valid():
 		return "active snapshot requires active encounter"
-	if enc.get_area_id() != area or enc.get_stage_id() != stage:
-		return "encounter stage/area mismatch"
-	var party_c: Array[BattleCombatant] = enc.get_party_combatants()
+	var party_c: Array[BattleCombatantModel] = enc.get_player_combatants()
 	if party_c.size() != party.size():
 		return "encounter party size mismatch"
 	for i in party.size():
-		if party_c[i].get_definition_id() != party[i]:
+		if party_c[i].get_source_id() != party[i]:
 			return "encounter party id mismatch"
-	if party_c[0].get_definition_id() != leader or not party_c[0].is_leader():
+	if party_c[0].get_source_id() != leader:
 		return "encounter leader mismatch"
-	if enc.get_enemy_count() < 1:
+	var enemies: Array[BattleCombatantModel] = enc.get_enemy_combatants()
+	if enemies.is_empty():
 		return "encounter requires enemies"
+	var aei: int = enc.get_active_enemy_index()
+	if aei < 0 or aei >= enemies.size():
+		return "invalid active_enemy_index"
+	# Enemy order must match StageEncounterCatalog
+	var link: Dictionary = StageEncounterCatalog.find_encounter(stage)
+	if not bool(link.get("ok", false)):
+		return "stage encounter missing for binding"
+	var expected_ids: Array = (link.get("encounter", {}) as Dictionary).get("enemy_ids", []) as Array
+	if expected_ids.size() != enemies.size():
+		return "enemy count mismatch catalog"
+	for i in enemies.size():
+		if enemies[i].get_source_id() != (expected_ids[i] as StringName):
+			return "enemy order mismatch catalog"
 	return ""
 
 

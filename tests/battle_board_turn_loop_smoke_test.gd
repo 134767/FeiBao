@@ -1438,7 +1438,11 @@ func _run_enter_leave_screen_tests() -> void:
 	var buttons: Array = screen.call("get_cell_buttons") as Array
 	_assert_eq("ui_cells", buttons.size(), 30)
 	_assert_true("ui_turn", str(screen.call("get_turn_text")).find("0") >= 0)
-	_assert_true("ui_shell", str(screen.call("get_shell_status_text")).find("盤面") >= 0)
+	_assert_true(
+		"ui_shell",
+		str(screen.call("get_shell_status_text")).find("戰鬥單位") >= 0
+		or str(screen.call("get_shell_status_text")).find("盤面") >= 0
+	)
 
 	# Selection visible via press
 	screen.call("press_cell_for_test", 0, 0)

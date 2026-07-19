@@ -20,8 +20,8 @@ const PATH_ADVENTURE_SCREEN: String = "res://scenes/screens/adventure/adventure_
 const PATH_BATTLE_SCREEN: String = "res://scenes/screens/battle/battle_screen.tscn"
 const PATH_CHARACTER_CATALOG: String = "res://data/character_catalog.json"
 const PATH_STAGE_CATALOG: String = "res://data/stage_catalog.json"
-const PATH_CHARACTER_COMBAT_STATS: String = "res://data/character_combat_stats.json"
-const PATH_ENEMY_CATALOG: String = "res://data/enemy_catalog.json"
+const PATH_BATTLE_CHARACTER_STATS: String = "res://data/battle_character_stats.json"
+const PATH_ENEMIES: String = "res://data/enemies.json"
 const PATH_STAGE_ENCOUNTERS: String = "res://data/stage_encounters.json"
 
 const PLAYER_NAME_MIN_LENGTH: int = 1

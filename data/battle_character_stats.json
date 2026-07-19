@@ -4,45 +4,45 @@
   "stats": [
     {
       "character_id": "feibao_dev",
+      "affinity": "ember",
       "max_hp": 120,
       "attack": 14,
-      "defense": 8,
-      "is_development_seed": true
+      "defense": 8
     },
     {
       "character_id": "partner_a",
+      "affinity": "tide",
       "max_hp": 100,
       "attack": 12,
-      "defense": 7,
-      "is_development_seed": true
+      "defense": 7
     },
     {
       "character_id": "partner_b",
+      "affinity": "leaf",
       "max_hp": 90,
       "attack": 15,
-      "defense": 5,
-      "is_development_seed": true
+      "defense": 5
     },
     {
       "character_id": "partner_c",
+      "affinity": "light",
       "max_hp": 110,
       "attack": 10,
-      "defense": 10,
-      "is_development_seed": true
+      "defense": 10
     },
     {
       "character_id": "partner_d",
+      "affinity": "shadow",
       "max_hp": 140,
       "attack": 9,
-      "defense": 12,
-      "is_development_seed": true
+      "defense": 12
     },
     {
       "character_id": "partner_e",
+      "affinity": "ember",
       "max_hp": 85,
       "attack": 16,
-      "defense": 4,
-      "is_development_seed": true
+      "defense": 4
     }
   ]
 }

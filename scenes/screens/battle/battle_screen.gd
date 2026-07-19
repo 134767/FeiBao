@@ -4,15 +4,14 @@ extends Control
 signal back_requested
 signal leave_requested
 
-const MSG_SHELL: String = "開發樣本：盤面回合＋遭遇單位狀態（尚無傷害）"
+const MSG_SHELL: String = "開發樣本：戰鬥單位狀態已建立；傷害與敵人行動尚未啟用。"
 const MSG_NO_SESSION: String = "沒有有效的戰鬥工作階段"
 const MSG_NO_RUNTIME: String = "沒有有效的戰鬥盤面"
 const MSG_CHAR_MISSING: String = "出戰角色定義缺失"
 const MSG_LEAVE: String = "離開戰鬥"
 const SEED_HINT: String = "本頁為戰鬥遭遇與單位狀態開發樣本，非正式完整戰鬥內容。"
-const PARTY_LINE_FMT: String = "%d. %s HP %d/%d%s"
-const ENEMY_LINE_FMT: String = "%d. %s HP %d/%d"
 const LEADER_MARK: String = "（領隊）"
+const ACTIVE_MARK: String = "（作用中）"
 const STAGE_LINE_FMT: String = "關卡：%s"
 const STAGE_NUM_FMT: String = "關卡編號：%d"
 const AREA_LINE_FMT: String = "區域：%s"
@@ -25,6 +24,7 @@ const MATCH_FMT: String = "上次消除：%d"
 const CASCADE_FMT: String = "上次連鎖：%d"
 const HINT_IDLE: String = "點選相鄰兩格交換；同格再點取消"
 const CELL_MIN: float = 48.0
+const HP_BAR_MIN_H: float = 16.0
 
 const ORB_COLORS: Dictionary = {
 	BattleOrbKind.EMBER: Color(0.86, 0.32, 0.22),
@@ -48,8 +48,10 @@ const ORB_COLORS: Dictionary = {
 @onready var _leader_label: Label = %LeaderLabel
 @onready var _party_header_label: Label = %PartyHeaderLabel
 @onready var _party_list_label: Label = %PartyListLabel
+@onready var _party_cards: VBoxContainer = %PartyCards
 @onready var _enemy_header_label: Label = %EnemyHeaderLabel
 @onready var _enemy_list_label: Label = %EnemyListLabel
+@onready var _enemy_cards: VBoxContainer = %EnemyCards
 @onready var _turn_label: Label = %TurnLabel
 @onready var _match_label: Label = %MatchLabel
 @onready var _cascade_label: Label = %CascadeLabel
@@ -326,28 +328,159 @@ func _apply_runtime_ui() -> void:
 
 func _apply_combatant_ui() -> void:
 	if not is_instance_valid(BattleRuntime) or not BattleRuntime.has_active_runtime():
+		_clear_combatant_cards()
 		return
-	var party: Array[BattleCombatant] = BattleRuntime.get_party_combatants()
+	var party: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
 	if _party_header_label != null:
 		_party_header_label.text = PARTY_HEADER_FMT % party.size()
 	if _party_list_label != null:
 		var plines: PackedStringArray = PackedStringArray()
 		for c in party:
-			var mark: String = LEADER_MARK if c.is_leader() else ""
+			var mark: String = LEADER_MARK if c.get_slot_index() == 0 else ""
+			var aff: String = "%s%s" % [BattleAffinity.symbol(c.get_affinity()), BattleAffinity.display_name(c.get_affinity())]
 			plines.append(
-				PARTY_LINE_FMT % [c.get_slot_index() + 1, c.get_display_name(), c.get_current_hp(), c.get_max_hp(), mark]
+				"%d. %s %s HP %d/%d ATK %d DEF %d%s"
+				% [
+					c.get_slot_index() + 1,
+					c.get_display_name(),
+					aff,
+					c.get_current_hp(),
+					c.get_max_hp(),
+					c.get_attack(),
+					c.get_defense(),
+					mark,
+				]
 			)
 		_party_list_label.text = "\n".join(plines)
-	var enemies: Array[BattleCombatant] = BattleRuntime.get_enemy_combatants()
+	_rebuild_player_cards(party)
+
+	var enemies: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
+	var aei: int = BattleRuntime.get_active_enemy_index()
 	if _enemy_header_label != null:
 		_enemy_header_label.text = ENEMY_HEADER_FMT % enemies.size()
 	if _enemy_list_label != null:
 		var elines: PackedStringArray = PackedStringArray()
 		for e in enemies:
+			var mark_e: String = ACTIVE_MARK if e.get_slot_index() == aei else ""
+			var aff_e: String = "%s%s" % [BattleAffinity.symbol(e.get_affinity()), BattleAffinity.display_name(e.get_affinity())]
+			var vis: String = ""
+			var er: Dictionary = EnemyCatalog.find_enemy(e.get_source_id())
+			if bool(er.get("ok", false)):
+				vis = str((er.get("enemy", {}) as Dictionary).get("visual_symbol", ""))
 			elines.append(
-				ENEMY_LINE_FMT % [e.get_slot_index() + 1, e.get_display_name(), e.get_current_hp(), e.get_max_hp()]
+				"%d. %s %s %s HP %d/%d%s"
+				% [
+					e.get_slot_index() + 1,
+					vis,
+					e.get_display_name(),
+					aff_e,
+					e.get_current_hp(),
+					e.get_max_hp(),
+					mark_e,
+				]
 			)
 		_enemy_list_label.text = "\n".join(elines)
+	_rebuild_enemy_cards(enemies, aei)
+
+
+func _clear_combatant_cards() -> void:
+	if _party_cards != null:
+		for c in _party_cards.get_children():
+			_party_cards.remove_child(c)
+			c.queue_free()
+	if _enemy_cards != null:
+		for c in _enemy_cards.get_children():
+			_enemy_cards.remove_child(c)
+			c.queue_free()
+
+
+func _rebuild_player_cards(party: Array[BattleCombatantModel]) -> void:
+	if _party_cards == null:
+		return
+	_clear_box(_party_cards)
+	for c in party:
+		_party_cards.add_child(_make_player_card(c))
+
+
+func _rebuild_enemy_cards(enemies: Array[BattleCombatantModel], aei: int) -> void:
+	if _enemy_cards == null:
+		return
+	_clear_box(_enemy_cards)
+	for e in enemies:
+		_enemy_cards.add_child(_make_enemy_card(e, e.get_slot_index() == aei))
+
+
+func _clear_box(box: VBoxContainer) -> void:
+	for c in box.get_children():
+		box.remove_child(c)
+		c.queue_free()
+
+
+func _make_player_card(c: BattleCombatantModel) -> Control:
+	var panel := PanelContainer.new()
+	panel.focus_mode = Control.FOCUS_NONE
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	var title := Label.new()
+	var mark: String = LEADER_MARK if c.get_slot_index() == 0 else ""
+	title.text = "%s%s" % [c.get_display_name(), mark]
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var aff := Label.new()
+	aff.text = "%s %s" % [BattleAffinity.symbol(c.get_affinity()), BattleAffinity.display_name(c.get_affinity())]
+	var hp := Label.new()
+	hp.text = "HP %d / %d" % [c.get_current_hp(), c.get_max_hp()]
+	var bar := ProgressBar.new()
+	bar.min_value = 0
+	bar.max_value = maxf(1.0, float(c.get_max_hp()))
+	bar.value = float(c.get_current_hp())
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, HP_BAR_MIN_H)
+	bar.focus_mode = Control.FOCUS_NONE
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var stats := Label.new()
+	stats.text = "ATK %d · DEF %d" % [c.get_attack(), c.get_defense()]
+	v.add_child(title)
+	v.add_child(aff)
+	v.add_child(hp)
+	v.add_child(bar)
+	v.add_child(stats)
+	panel.add_child(v)
+	return panel
+
+
+func _make_enemy_card(e: BattleCombatantModel, is_active: bool) -> Control:
+	var panel := PanelContainer.new()
+	panel.focus_mode = Control.FOCUS_NONE
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	var vis: String = "?"
+	var er: Dictionary = EnemyCatalog.find_enemy(e.get_source_id())
+	if bool(er.get("ok", false)):
+		vis = str((er.get("enemy", {}) as Dictionary).get("visual_symbol", "?"))
+	var title := Label.new()
+	var mark: String = ACTIVE_MARK if is_active else ""
+	title.text = "%s %s%s" % [vis, e.get_display_name(), mark]
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var aff := Label.new()
+	aff.text = "%s %s" % [BattleAffinity.symbol(e.get_affinity()), BattleAffinity.display_name(e.get_affinity())]
+	var hp := Label.new()
+	hp.text = "HP %d / %d" % [e.get_current_hp(), e.get_max_hp()]
+	var bar := ProgressBar.new()
+	bar.min_value = 0
+	bar.max_value = maxf(1.0, float(e.get_max_hp()))
+	bar.value = float(e.get_current_hp())
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, HP_BAR_MIN_H)
+	bar.focus_mode = Control.FOCUS_NONE
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(title)
+	v.add_child(aff)
+	v.add_child(hp)
+	v.add_child(bar)
+	panel.add_child(v)
+	return panel
 
 
 func _paint_empty_board() -> void:

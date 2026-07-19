@@ -4,33 +4,27 @@
   "encounters": [
     {
       "stage_id": "dev_stage_beginner_01",
-      "enemy_ids": ["dev_ember_imp"],
-      "is_development_seed": true
+      "enemy_ids": ["training_sprout"]
     },
     {
       "stage_id": "dev_stage_beginner_02",
-      "enemy_ids": ["dev_ember_imp", "dev_tide_wisp"],
-      "is_development_seed": true
+      "enemy_ids": ["training_sprout", "training_droplet"]
     },
     {
       "stage_id": "dev_stage_beginner_03",
-      "enemy_ids": ["dev_tide_wisp", "dev_shadow_mite"],
-      "is_development_seed": true
+      "enemy_ids": ["training_droplet", "training_emberling"]
     },
     {
       "stage_id": "dev_stage_mist_01",
-      "enemy_ids": ["dev_shadow_mite"],
-      "is_development_seed": true
+      "enemy_ids": ["training_emberling"]
     },
     {
       "stage_id": "dev_stage_mist_02",
-      "enemy_ids": ["dev_ember_imp", "dev_shadow_mite"],
-      "is_development_seed": true
+      "enemy_ids": ["training_sprout", "training_emberling"]
     },
     {
       "stage_id": "dev_stage_mist_03",
-      "enemy_ids": ["dev_ember_imp", "dev_tide_wisp", "dev_shadow_mite"],
-      "is_development_seed": true
+      "enemy_ids": ["training_sprout", "training_droplet", "training_emberling"]
     }
   ]
 }

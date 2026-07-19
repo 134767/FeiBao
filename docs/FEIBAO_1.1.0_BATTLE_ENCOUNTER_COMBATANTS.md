@@ -2,57 +2,73 @@
 
 ## Purpose
 
-Add **memory-only battle participants and encounter state** on top of the 1.0.0 board + turn loop:
+Memory-only battle participants and encounter state on the 1.0.0 board + turn loop:
 
-1. Player party combat stats (catalog blueprints)
-2. Development enemy definitions
-3. Explicit stage → enemy encounter linkage
-4. In-memory `BattleEncounterModel`
-5. Atomic board + encounter begin / snapshot in `BattleRuntime`
-6. BattleScreen party/enemy HP status display
+1. Player combat stat blueprints (`BattleCharacterStatsCatalog`)
+2. Original development enemies (`EnemyCatalog`)
+3. Stage → enemy encounter linkage (`StageEncounterCatalog`)
+4. `BattleAffinity` (ember/tide/leaf/light/shadow) with geometric symbols
+5. `BattleCombatantModel` + `BattleEncounterModel`
+6. Atomic board + encounter begin/snapshot in `BattleRuntime`
+7. BattleScreen party/enemy status cards (HP text + ProgressBar)
 
-This is **not** real combat: no damage, attacks, skills, AI, win/loss, or rewards.
+No damage, attacks, skills, AI, win/loss, or rewards.
 
-## Data catalogs
+## Architecture
+
+```text
+data JSON → catalog parsers → pure combatant/encounter domain → BattleRuntime → BattleScreen
+```
+
+- **BattleState**: session metadata only (no board, no HP)
+- **BattleRuntime**: sole active battle authority (board + encounter)
+- Catalogs/domain: no SceneTree, NavigationState, or PlayerData mutation
+
+## Data
 
 | Catalog | Path | Schema |
 |---------|------|--------|
-| Character combat stats | `data/character_combat_stats.json` | 1 |
-| Enemy catalog | `data/enemy_catalog.json` | 1 |
+| Character battle stats | `data/battle_character_stats.json` | 1 |
+| Enemies | `data/enemies.json` | 1 |
 | Stage encounters | `data/stage_encounters.json` | 1 |
 
-Stage presentation catalog and character presentation catalog remain **schema 1** (no combat fields embedded).
+PlayerProfile remains **schema 2**. Stage presentation catalog remains **schema 1**.
 
-PlayerProfile remains **schema 2** (IDs only; no combat persistence).
+## Domain
 
-## Core types
+- `BattleAffinity` — all / is_valid / display_name / symbol (▲●◆✦■)
+- `BattleCombatantModel` — player|enemy; snapshot with exact keys; catalog immutable stats check
+- `BattleEncounterModel` — players 1–3, enemies 1–3, `active_enemy_index` (start 0; inactive −1)
 
-- `CharacterCombatStatsDefinition` / `CharacterCombatStatsCatalog`
-- `EnemyDefinition` / `EnemyCatalog`
-- `StageEncounterDefinition` / `StageEncounterCatalog`
-- `BattleCombatant` — side, id, name, slot, max/current HP, ATK, DEF, leader flag
-- `BattleEncounterModel` — build from session, snapshot/restore, equality
+## BattleRuntime
 
-## BattleRuntime (1.1.0)
+Begin order (candidate then one-shot commit):
 
-- `begin_from_battle_session` / `begin_from_seed_for_tests` build **board + encounter atomically**
-- Fail closed: encounter build failure does not leave an active board
-- Snapshot key `encounter` required on restore
-- Active encounter must match session stage/area/party/leader
-- Inactive: empty encounter with board canonical inactive
-- Getters: `get_party_combatants`, `get_enemy_combatants`, counts, `has_active_encounter`
-- Signal: `encounter_changed`
+1. Validate BattleState binding  
+2–5. Build candidate encounter  
+6–7. Build candidate board (isolated engine)  
+8. Commit board + encounter + binding  
+9. Emit signals  
+
+Failure: runtime completely unchanged; zero signals.
+
+Snapshot key `encounter`: `{ player_combatants, enemy_combatants, active_enemy_index }`.
 
 ## BattleScreen
 
-- Party list shows `HP current/max` and leader mark
-- Enemy header + list with HP
-- Still no target selection, damage, or victory UI
+- Enemy cards: visual_symbol, name, affinity, HP, bar, active badge (index 0)
+- Player cards: name, affinity, HP, bar, ATK/DEF, leader badge (index 0)
+- Notice: 「戰鬥單位狀態已建立；傷害與敵人行動尚未啟用。」
+- Board turns do not change HP or active enemy index
 
-## Explicit exclusions
+## Exclusions
 
-Board-clear damage, player/enemy attacks, damage formulas, elemental multipliers, skills/leader skills, AI, target switching, win/loss, stage completion, rewards, profile schema 3, battle disk save, network, Android export, third-party assets.
+Damage, player/enemy attacks, affinity multipliers, skills, AI, target switching, victory/defeat, rewards, schema 3, network, Android export, third-party assets.
+
+## Licensing
+
+Clean-room FeiBao GDScript and project assets only.
 
 ## Version
 
-App **1.1.0**. Profile schema **2**. Stage catalog schema **1**.
+App **1.1.0**.
