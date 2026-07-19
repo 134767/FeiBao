@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **1.1.0**
+- **App version:** **1.2.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -89,6 +89,16 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Enter creates state + runtime; leave clears both with dual rollback
 - See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
 
+## Player Attack & Damage (1.2.0)
+
+- `BattleCombatEvent` + pure `BattleDamageResolver`; formula floor(atk×orbs/3)−def (min 1)
+- Atomic accepted turn: candidate board + damage then one-shot commit
+- Runtime snapshot `last_combat_events`; signal `combat_changed`
+- BattleScreen attack log; enemy HP refresh; player HP unchanged
+- Evidence suite: `tests/player_attack_damage_smoke_test.gd` (apply_damage, events, formula, runtime, UI, responsive)
+- No enemy turn, multipliers, skills, win/loss, rewards, or combat disk save
+- See `docs/FEIBAO_1.2.0_PLAYER_ATTACK_DAMAGE.md`
+
 ## Battle Encounter & Combatants (1.1.0)
 
 - Combat stats / enemy / stage-encounter catalogs; BattleEncounterModel
@@ -97,7 +107,6 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Test-only catalog path overrides under `user://feibao_tests/` or `res://tests/fixtures/`
 - BattleScreen: card-only visible combatants (cached summary getters); multi-column cards on wide viewports
 - Evidence suite (GROK-038): forced turn, Adventure exact transactions, 3×3 snapshot matrix, exact cards, Space key outcomes, SubViewport scroll-visible containment, separate assertion integrity scanner
-- No damage or victory; board turns leave HP / active enemy unchanged
 - See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
 ## Git Branch & PR Rules

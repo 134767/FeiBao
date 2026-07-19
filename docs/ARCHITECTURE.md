@@ -3,7 +3,7 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 1.1.0** — battle encounter & combatant foundation.
+**Current version: 1.2.0** — player attack & damage foundation.
 
 Does **not** claim production multiplayer, finished combat, or cloud systems.
 
@@ -21,7 +21,8 @@ Does **not** claim production multiplayer, finished combat, or cloud systems.
 | 0.8.0 | Adventure stage selection + StageCatalog + AdventureState preparation |
 | 0.9.0 | Battle session shell + BattleScreen (no real combat) |
 | 1.0.0 | 6×5 board, BattleRuntime, deterministic turn resolution |
-| **1.1.0 (current)** | Encounter combatants, enemy catalog, party/enemy HP display |
+| 1.1.0 | Encounter combatants, enemy catalog, party/enemy HP display |
+| **1.2.0 (current)** | Player attack damage foundation (orb → HP), combat events |
 
 ## Clean-room Principles
 
@@ -55,13 +56,23 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
   ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
 
+## Player Attack & Damage (1.2.0)
+
+- Board `cells_cleared.orb_kinds` → affinity counts → party-order player attacks.
+- Pure `BattleDamageResolver` + `BattleCombatEvent` (no UI / PlayerData / disk).
+- Atomic candidate commit: board + RNG + turn + board events + encounter HP + combat events.
+- BattleScreen attack log; enemy HP refresh; no enemy turn / win-loss / target switch.
+- PlayerProfile schema remains **2**.
+
+See `docs/FEIBAO_1.2.0_PLAYER_ATTACK_DAMAGE.md`.
+
 ## Battle Encounter & Combatants (1.1.0)
 
 - Character combat stats + enemy + stage-encounter catalogs (memory blueprints only).
 - Catalog numerics: **whole JSON numbers** normalized to int (not claimed as Variant TYPE_INT).
 - Snapshot combatant fields remain **TYPE_INT only**.
 - `BattleEncounterModel` inside BattleRuntime; atomic board+encounter begin/snapshot.
-- BattleScreen shows party/enemy HP status; no damage, AI, win/loss, or rewards.
+- BattleScreen shows party/enemy HP status.
 - PlayerProfile schema remains **2**.
 
 See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`.

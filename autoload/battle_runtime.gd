@@ -1,11 +1,12 @@
-## In-memory battle board + encounter runtime (1.1.0). No disk, navigation, or profile mutation.
-## Full session binding: area + stage + party (order) + leader + encounter combatants.
+## In-memory battle board + encounter + combat runtime (1.2.0). No disk, navigation, or profile mutation.
+## Full session binding: area + stage + party (order) + leader + encounter combatants + combat events.
 extends Node
 
 signal runtime_changed(active: bool)
 signal board_changed
 signal phase_changed(phase: StringName)
 signal encounter_changed
+signal combat_changed
 
 const PHASE_INACTIVE: StringName = &"inactive"
 const PHASE_READY: StringName = &"ready"
@@ -37,14 +38,22 @@ var _last_cascade_count: int = 0
 var _phase: StringName = PHASE_INACTIVE
 var _selected: Vector2i = Vector2i(-1, -1)
 var _last_events: Array = []
+var _last_combat_events: Array = []
 var _last_message: String = ""
 var _encounter: BattleEncounterModel = BattleEncounterModel.new()
+var _damage_resolver_force_fail_for_tests: bool = false
+var _refill_kind_override_for_tests: StringName = &""
+var _cascade_hard_cap_override_for_tests: int = 0
 
 
 func reset_runtime_state_for_tests() -> void:
 	_clear_fields(false)
 	_engine.clear_refill_kind_override_for_tests()
 	_engine.clear_cascade_hard_cap_override_for_tests()
+	_refill_kind_override_for_tests = &""
+	_cascade_hard_cap_override_for_tests = 0
+	clear_damage_resolver_force_fail_for_tests()
+	BattleDamageResolver.clear_force_fail_for_tests()
 
 
 func has_active_runtime() -> bool:
@@ -109,6 +118,10 @@ func has_selection() -> bool:
 
 func get_last_resolution_events() -> Array:
 	return BattleResolutionEvent.duplicate_events(_last_events)
+
+
+func get_last_combat_events() -> Array:
+	return BattleCombatEvent.duplicate_events(_last_combat_events)
 
 
 func get_last_message() -> String:
@@ -206,6 +219,7 @@ func begin_from_battle_session() -> Dictionary:
 	_last_match_count = 0
 	_last_cascade_count = 0
 	_last_events.clear()
+	_last_combat_events.clear()
 	_last_message = ""
 	_selected = Vector2i(-1, -1)
 	_encounter.assign_from(next_enc)
@@ -213,6 +227,7 @@ func begin_from_battle_session() -> Dictionary:
 	runtime_changed.emit(true)
 	board_changed.emit()
 	encounter_changed.emit()
+	combat_changed.emit()
 	return _result(true, true, "")
 
 
@@ -247,6 +262,7 @@ func begin_from_seed_for_tests(seed: int) -> Dictionary:
 	_last_match_count = 0
 	_last_cascade_count = 0
 	_last_events.clear()
+	_last_combat_events.clear()
 	_last_message = ""
 	_selected = Vector2i(-1, -1)
 	_encounter.assign_from(next_enc)
@@ -254,6 +270,7 @@ func begin_from_seed_for_tests(seed: int) -> Dictionary:
 	runtime_changed.emit(true)
 	board_changed.emit()
 	encounter_changed.emit()
+	combat_changed.emit()
 	return _result(true, true, "")
 
 
@@ -261,11 +278,14 @@ func clear_runtime() -> Dictionary:
 	if not has_active_runtime() and _phase == PHASE_INACTIVE and not _active:
 		return _result(true, false, "")
 	var was_active: bool = _active
+	var had_combat: bool = not _last_combat_events.is_empty()
 	_clear_fields(true)
 	if was_active:
 		runtime_changed.emit(false)
 		board_changed.emit()
 		encounter_changed.emit()
+		if had_combat:
+			combat_changed.emit()
 	return _result(true, was_active, "")
 
 
@@ -287,6 +307,7 @@ func capture_runtime_snapshot() -> Dictionary:
 		"last_match_count": _last_match_count,
 		"last_cascade_count": _last_cascade_count,
 		"last_resolution_events": BattleResolutionEvent.duplicate_events(_last_events),
+		"last_combat_events": BattleCombatEvent.duplicate_events(_last_combat_events),
 		"last_message": _last_message,
 		"encounter": _encounter.capture_snapshot(),
 	}
@@ -320,6 +341,15 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	if not bool(events_check.get("ok", false)):
 		return _result(false, false, "invalid resolution events: %s" % str(events_check.get("error", "")))
 	var next_events: Array = events_check.get("events", []) as Array
+	if not snapshot.has("last_combat_events"):
+		return _result(false, false, "missing last_combat_events")
+	var raw_combat: Variant = snapshot.get("last_combat_events")
+	if not (raw_combat is Array):
+		return _result(false, false, "last_combat_events must be Array")
+	var combat_check: Dictionary = BattleCombatEvent.validate_events(raw_combat)
+	if not bool(combat_check.get("ok", false)):
+		return _result(false, false, "invalid combat events: %s" % str(combat_check.get("error", "")))
+	var next_combat: Array = combat_check.get("events", []) as Array
 	var next_msg: String = str(snapshot.get("last_message", ""))
 	if not snapshot.has("encounter"):
 		return _result(false, false, "missing encounter")
@@ -379,6 +409,11 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		var enc_bind_err: String = _validate_encounter_binding(next_enc, next_area, next_stage, next_party, next_leader)
 		if not enc_bind_err.is_empty():
 			return _result(false, false, enc_bind_err)
+		var combat_bind_err: String = _validate_combat_snapshot_binding(
+			next_combat, next_events, next_enc, next_turn, next_party, next_match, next_cascade
+		)
+		if not combat_bind_err.is_empty():
+			return _result(false, false, combat_bind_err)
 	else:
 		var inactive_err: String = _validate_inactive_canonical(
 			next_phase,
@@ -393,6 +428,7 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 			next_match,
 			next_cascade,
 			next_events,
+			next_combat,
 			next_msg,
 			next_rng
 		)
@@ -420,6 +456,7 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		and _last_message == next_msg
 		and _board.equals_cells(next_cells)
 		and BattleResolutionEvent.events_equal(_last_events, next_events)
+		and BattleCombatEvent.events_equal(_last_combat_events, next_combat)
 		and BattleEncounterModel.equals(_encounter, next_enc)
 	):
 		return _result(true, false, "")
@@ -436,12 +473,15 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	_last_match_count = next_match
 	_last_cascade_count = next_cascade
 	_last_events = next_events
+	_last_combat_events = next_combat
 	_last_message = next_msg
 	_encounter.assign_from(next_enc)
 	_set_phase(next_phase)
+	# Changed restore: board + encounter + combat events committed together.
 	runtime_changed.emit(_active)
 	board_changed.emit()
 	encounter_changed.emit()
+	combat_changed.emit()
 	return _result(true, true, "")
 
 
@@ -528,6 +568,7 @@ func _validate_inactive_canonical(
 	match_n: int,
 	cascade_n: int,
 	events: Array,
+	combat_events: Array,
 	msg: String,
 	rng: int
 ) -> String:
@@ -543,6 +584,8 @@ func _validate_inactive_canonical(
 		return "inactive snapshot requires zero counters"
 	if not events.is_empty():
 		return "inactive snapshot requires empty events"
+	if not combat_events.is_empty():
+		return "inactive snapshot requires empty combat events"
 	if not msg.is_empty():
 		return "inactive snapshot requires empty message"
 	if rng != CANONICAL_INACTIVE_RNG:
@@ -551,6 +594,210 @@ func _validate_inactive_canonical(
 		if not BattleOrbKind.is_empty(k):
 			return "inactive snapshot requires empty board"
 	return ""
+
+
+## Empty combat is legal only for initial turn-zero state or sole swap_rejected evidence.
+func _validate_empty_combat_snapshot(
+	board_events: Array,
+	turn_count: int,
+	match_count: int,
+	cascade_count: int
+) -> String:
+	# B1: new battle / no accepted turn yet.
+	if board_events.is_empty():
+		if turn_count == 0 and match_count == 0 and cascade_count == 0:
+			return ""
+		# B4: positive turn with no board/combat evidence.
+		if turn_count > 0:
+			return "positive turn requires resolution or rejected-swap evidence"
+		return "empty board requires zero turn/match/cascade for empty combat"
+	# B2: last action was rejected swap (exact single event; counts already schema-checked).
+	if board_events.size() == 1:
+		var sole: StringName = (board_events[0] as Dictionary).get("type") as StringName
+		if sole == BattleResolutionEvent.TYPE_SWAP_REJECTED:
+			if match_count != 0 or cascade_count != 0:
+				return "rejected swap requires zero match/cascade counts"
+			return ""
+	# B3: accepted board sequence requires combat summary.
+	var first_type: StringName = (board_events[0] as Dictionary).get("type") as StringName
+	var last_type: StringName = (
+		board_events[board_events.size() - 1] as Dictionary
+	).get("type") as StringName
+	if (
+		first_type == BattleResolutionEvent.TYPE_SWAP
+		and last_type == BattleResolutionEvent.TYPE_TURN_COMPLETED
+	):
+		return "accepted board sequence requires combat events"
+	return "empty combat invalid for board event sequence"
+
+
+## Cross-check combat events by full re-simulation matching BattleDamageResolver.
+func _validate_combat_snapshot_binding(
+	combat_events: Array,
+	board_events: Array,
+	enc: BattleEncounterModel,
+	turn_count: int,
+	party: Array[StringName],
+	match_count: int = 0,
+	cascade_count: int = 0
+) -> String:
+	if combat_events.is_empty():
+		return _validate_empty_combat_snapshot(board_events, turn_count, match_count, cascade_count)
+	if board_events.is_empty():
+		return "combat events require board events"
+	var first_board: StringName = (board_events[0] as Dictionary).get("type") as StringName
+	if first_board == BattleResolutionEvent.TYPE_SWAP_REJECTED:
+		return "combat events invalid with rejected swap board events"
+	var last_board: Dictionary = board_events[board_events.size() - 1] as Dictionary
+	if (last_board.get("type") as StringName) != BattleResolutionEvent.TYPE_TURN_COMPLETED:
+		return "combat events require accepted board sequence"
+	var summary: Dictionary = combat_events[combat_events.size() - 1] as Dictionary
+	if (summary.get("type") as StringName) != BattleCombatEvent.TYPE_PLAYER_COMBAT_COMPLETED:
+		return "combat summary missing"
+	if (summary.get("turn_count") as int) != turn_count:
+		return "combat turn_count != runtime turn_count"
+	if (last_board.get("turn_count") as int) != turn_count:
+		return "board turn_count != runtime turn_count"
+	var active: BattleCombatantModel = enc.get_active_enemy()
+	if active == null:
+		return "active enemy missing for combat binding"
+	if (summary.get("target_id") as StringName) != active.get_source_id():
+		return "combat target_id != active enemy"
+	if (summary.get("target_hp_after") as int) != active.get_current_hp():
+		return "combat target_hp_after != active enemy current_hp"
+	# C: summary / first damage hp_before must not exceed enemy max_hp.
+	var max_hp: int = active.get_max_hp()
+	if (summary.get("target_hp_before") as int) > max_hp:
+		return "combat target_hp_before exceeds enemy max_hp"
+	if combat_events.size() > 1:
+		var first_dmg: Dictionary = combat_events[0] as Dictionary
+		if (first_dmg.get("type") as StringName) == BattleCombatEvent.TYPE_PLAYER_DAMAGE:
+			if (first_dmg.get("hp_before") as int) > max_hp:
+				return "combat target_hp_before exceeds enemy max_hp"
+
+	var expected: Dictionary = _simulate_expected_combat_events(
+		board_events, enc, party, turn_count, summary.get("target_hp_before") as int
+	)
+	if not bool(expected.get("ok", false)):
+		return str(expected.get("error", "combat simulation failed"))
+	var exp_events: Array = expected.get("events", []) as Array
+	if not BattleCombatEvent.events_equal(exp_events, combat_events):
+		return "combat events != full expected attack simulation"
+	if (expected.get("final_hp", -1) as int) != active.get_current_hp():
+		return "simulated final HP != encounter active enemy current_hp"
+	return ""
+
+
+## Pure re-simulation of player turn damage (identical rules to BattleDamageResolver).
+func _simulate_expected_combat_events(
+	board_events: Array,
+	enc: BattleEncounterModel,
+	party: Array[StringName],
+	turn_count: int,
+	summary_hp_before: int
+) -> Dictionary:
+	var fail: Dictionary = {"ok": false, "error": "", "events": [], "final_hp": 0}
+	var agg: Dictionary = BattleDamageResolver.aggregate_affinity_counts_for_tests(board_events)
+	if not bool(agg.get("ok", false)):
+		fail["error"] = "board orb aggregate failed: %s" % str(agg.get("error", ""))
+		return fail
+	var counts: Dictionary = agg.get("counts", {}) as Dictionary
+	var players: Array[BattleCombatantModel] = enc.get_player_combatants()
+	if players.size() != party.size():
+		fail["error"] = "party size mismatch for combat binding"
+		return fail
+	for i in party.size():
+		if players[i].get_source_id() != party[i]:
+			fail["error"] = "party order mismatch for combat binding"
+			return fail
+	var active: BattleCombatantModel = enc.get_active_enemy()
+	if active == null:
+		fail["error"] = "active enemy missing"
+		return fail
+	var target_id: StringName = active.get_source_id()
+	var target_defense: int = active.get_defense()
+	if typeof(summary_hp_before) != TYPE_INT or summary_hp_before < 0:
+		fail["error"] = "invalid summary target_hp_before"
+		return fail
+	var sim_hp: int = summary_hp_before
+	var damage_events: Array = []
+	# Target already 0: only zero-attack summary is legal.
+	if sim_hp <= 0:
+		var zsum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+			turn_count, 0, 0, target_id, 0, 0, true
+		)
+		var zv: Dictionary = BattleCombatEvent.validate_events([zsum])
+		if not bool(zv.get("ok", false)):
+			fail["error"] = "zero-hp summary invalid: %s" % str(zv.get("error", ""))
+			return fail
+		return {
+			"ok": true,
+			"error": "",
+			"events": zv.get("events", []) as Array,
+			"final_hp": 0,
+		}
+	for p in players:
+		if sim_hp <= 0:
+			break
+		var aff: StringName = p.get_affinity()
+		var cleared: int = int(counts.get(aff, 0))
+		if cleared < 3:
+			continue
+		var atk: int = p.get_attack()
+		var scaled: int = int(floor(float(atk * cleared) / 3.0))
+		var calculated: int = maxi(1, scaled - target_defense)
+		var actual: int = mini(calculated, sim_hp)
+		var hp_before: int = sim_hp
+		var hp_after: int = hp_before - actual
+		var dmg_ev: Dictionary = BattleCombatEvent.make_player_damage(
+			turn_count,
+			p.get_source_id(),
+			target_id,
+			aff,
+			cleared,
+			atk,
+			target_defense,
+			calculated,
+			actual,
+			hp_before,
+			hp_after
+		)
+		damage_events.append(dmg_ev)
+		sim_hp = hp_after
+	var total_damage: int = summary_hp_before - sim_hp
+	var attack_count: int = damage_events.size()
+	# Zero attack only when no eligible living-target affinity match.
+	if attack_count == 0:
+		# Confirm legitimacy: no player with cleared >= 3 while target was alive at start.
+		var any_eligible: bool = false
+		for p2 in players:
+			if int(counts.get(p2.get_affinity(), 0)) >= 3:
+				any_eligible = true
+				break
+		if any_eligible and summary_hp_before > 0:
+			fail["error"] = "matching affinity exists but zero damage events"
+			return fail
+	var summary: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		turn_count,
+		attack_count,
+		total_damage,
+		target_id,
+		summary_hp_before,
+		sim_hp,
+		sim_hp == 0
+	)
+	var all_ev: Array = damage_events.duplicate()
+	all_ev.append(summary)
+	var v: Dictionary = BattleCombatEvent.validate_events(all_ev)
+	if not bool(v.get("ok", false)):
+		fail["error"] = "expected combat validation failed: %s" % str(v.get("error", ""))
+		return fail
+	return {
+		"ok": true,
+		"error": "",
+		"events": v.get("events", []) as Array,
+		"final_hp": sim_hp,
+	}
 
 
 ## Select / deselect / retarget / attempt swap via cell press.
@@ -589,15 +836,17 @@ func try_swap_selected_with(x: int, y: int) -> Dictionary:
 
 func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 	if not has_active_runtime():
-		return {"ok": false, "accepted": false, "error": "inactive"}
+		return _swap_result(false, false, "inactive")
 	if _phase == PHASE_RESOLVING or _phase == PHASE_INACTIVE:
-		return {"ok": false, "accepted": false, "error": "invalid phase"}
+		return _swap_result(false, false, "invalid phase")
 	if _phase == PHASE_ERROR:
-		return {"ok": false, "accepted": false, "error": "error phase"}
+		return _swap_result(false, false, "error phase")
 
-	var prior: Dictionary = capture_runtime_snapshot()
-	_set_phase(PHASE_RESOLVING)
-	var result: Dictionary = _engine.try_swap(
+	# Candidate transaction: compute board + damage on an isolated engine so
+	# live RNG/board are untouched until one-shot commit (fail-closed, zero signal).
+	# Do not emit PHASE_RESOLVING until validation succeeds.
+	var cand_engine: BattleBoardEngine = _make_candidate_engine()
+	var result: Dictionary = cand_engine.try_swap(
 		_board.get_cells(),
 		a.x,
 		a.y,
@@ -607,45 +856,112 @@ func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 	)
 
 	if not bool(result.get("ok", false)):
-		# Hard fail (bounds/cascade): restore exact prior domain, then ERROR only for cascade.
-		restore_runtime_snapshot(prior)
+		# Hard fail (bounds/cascade): exact prior domain; ERROR only for cascade.
 		var err: String = str(result.get("error", "swap failed"))
 		if err.find("cascade") >= 0:
 			_set_phase(PHASE_ERROR)
 			_last_message = "連鎖超過上限，已還原"
 		else:
 			_last_message = err
-		return {
-			"ok": false,
-			"accepted": false,
-			"error": err,
-		}
+		return _swap_result(false, false, err)
 
 	if not bool(result.get("accepted", false)):
+		# Rejected swap: clear combat events; encounter HP unchanged.
+		var had_combat: bool = not _last_combat_events.is_empty()
 		_selected = Vector2i(-1, -1)
 		_last_events = result.get("events", []) as Array
 		_last_match_count = 0
 		_last_cascade_count = 0
+		_last_combat_events = []
 		_last_message = "此交換沒有形成消除"
 		_set_phase(PHASE_READY)
 		board_changed.emit()
+		if had_combat:
+			combat_changed.emit()
 		return {
 			"ok": true,
 			"accepted": false,
 			"error": "",
 			"reason": "no match",
+			"attack_count": 0,
+			"total_damage": 0,
+			"target_hp_before": 0,
+			"target_hp_after": 0,
+			"target_defeated": false,
 		}
 
-	_board.set_cells(result.get("cells", []) as Array)
-	_engine.set_rng_state(int(result.get("rng_state", _engine.get_rng_state())))
-	_turn_count = int(result.get("turn_count", _turn_count))
-	_last_match_count = int(result.get("cleared_cell_count", 0))
-	_last_cascade_count = int(result.get("cascade_count", 0))
-	_last_events = result.get("events", []) as Array
+	# Accepted board move — candidate damage resolve (no live mutation yet).
+	var cand_cells: Array = result.get("cells", []) as Array
+	var cand_rng: int = int(result.get("rng_state", _engine.get_rng_state()))
+	var cand_turn: int = int(result.get("turn_count", _turn_count))
+	var cand_match: int = int(result.get("cleared_cell_count", 0))
+	var cand_cascade: int = int(result.get("cascade_count", 0))
+	var cand_board_events: Array = result.get("events", []) as Array
+
+	var board_ok: Dictionary = BattleResolutionEvent.validate_events_with_counts(
+		cand_board_events, cand_match, cand_cascade
+	)
+	if not bool(board_ok.get("ok", false)):
+		return _swap_result(false, false, "invalid candidate board events")
+
+	if _damage_resolver_force_fail_for_tests or BattleDamageResolver.is_force_fail_for_tests():
+		# Fail closed: prior exact, zero signal deltas from commit path.
+		return _swap_result(false, false, "damage resolver forced failure")
+
+	var dmg: Dictionary = BattleDamageResolver.resolve_player_turn(
+		cand_board_events, _encounter, cand_turn
+	)
+	if not bool(dmg.get("ok", false)):
+		return _swap_result(false, false, str(dmg.get("error", "damage resolve failed")))
+
+	var cand_enc: BattleEncounterModel = dmg.get("encounter") as BattleEncounterModel
+	var cand_combat: Array = dmg.get("combat_events", []) as Array
+	if cand_enc == null or not cand_enc.is_valid():
+		return _swap_result(false, false, "invalid candidate encounter")
+	var combat_ok: Dictionary = BattleCombatEvent.validate_events(cand_combat)
+	if not bool(combat_ok.get("ok", false)):
+		return _swap_result(false, false, "invalid combat events")
+	cand_combat = combat_ok.get("events", []) as Array
+
+	var summary: Dictionary = cand_combat[cand_combat.size() - 1] as Dictionary
+	var active_after: BattleCombatantModel = cand_enc.get_active_enemy()
+	if active_after == null:
+		return _swap_result(false, false, "candidate active enemy missing")
+	if (summary.get("target_hp_after") as int) != active_after.get_current_hp():
+		return _swap_result(false, false, "combat summary HP mismatch")
+	if (summary.get("target_id") as StringName) != active_after.get_source_id():
+		return _swap_result(false, false, "combat summary target mismatch")
+
+	# Candidate board cell validity.
+	if cand_cells.size() != BattleBoardModel.CELL_COUNT:
+		return _swap_result(false, false, "invalid candidate board size")
+	for k in cand_cells:
+		if not BattleOrbKind.is_valid(k as StringName):
+			return _swap_result(false, false, "invalid candidate orb")
+
+	var prior_hp: int = 0
+	var prior_enemy: BattleCombatantModel = _encounter.get_active_enemy()
+	if prior_enemy != null:
+		prior_hp = prior_enemy.get_current_hp()
+	var after_hp: int = active_after.get_current_hp()
+	var hp_changed: bool = prior_hp != after_hp
+
+	# One-shot commit: board + RNG + turn + board events + encounter + combat events.
+	_board.set_cells(cand_cells)
+	_engine.set_rng_state(cand_rng)
+	_turn_count = cand_turn
+	_last_match_count = cand_match
+	_last_cascade_count = cand_cascade
+	_last_events = board_ok.get("events", []) as Array
+	_last_combat_events = cand_combat
 	_selected = Vector2i(-1, -1)
+	_encounter.assign_from(cand_enc)
 	_last_message = "回合完成 · 消除 %d · 連鎖 %d" % [_last_match_count, _last_cascade_count]
 	_set_phase(PHASE_READY)
 	board_changed.emit()
+	combat_changed.emit()
+	if hp_changed:
+		encounter_changed.emit()
 	return {
 		"ok": true,
 		"accepted": true,
@@ -653,6 +969,11 @@ func try_swap_cells(a: Vector2i, b: Vector2i) -> Dictionary:
 		"cleared_cell_count": _last_match_count,
 		"cascade_count": _last_cascade_count,
 		"turn_count": _turn_count,
+		"attack_count": int(dmg.get("attack_count", 0)),
+		"total_damage": int(dmg.get("total_damage", 0)),
+		"target_hp_before": int(summary.get("target_hp_before", prior_hp)),
+		"target_hp_after": int(summary.get("target_hp_after", after_hp)),
+		"target_defeated": bool(summary.get("target_defeated", after_hp == 0)),
 	}
 
 
@@ -664,18 +985,41 @@ func set_board_cells_for_tests(cells: Array) -> bool:
 
 func set_refill_kind_override_for_tests(kind: StringName) -> void:
 	_engine.set_refill_kind_override_for_tests(kind)
+	_refill_kind_override_for_tests = kind
 
 
 func clear_refill_kind_override_for_tests() -> void:
 	_engine.clear_refill_kind_override_for_tests()
+	_refill_kind_override_for_tests = &""
 
 
 func set_cascade_hard_cap_override_for_tests(cap: int) -> void:
 	_engine.set_cascade_hard_cap_override_for_tests(cap)
+	_cascade_hard_cap_override_for_tests = maxi(0, cap)
 
 
 func clear_cascade_hard_cap_override_for_tests() -> void:
 	_engine.clear_cascade_hard_cap_override_for_tests()
+	_cascade_hard_cap_override_for_tests = 0
+
+
+func _make_candidate_engine() -> BattleBoardEngine:
+	var eng := BattleBoardEngine.new()
+	eng.set_rng_state(_engine.get_rng_state())
+	if not String(_refill_kind_override_for_tests).is_empty():
+		eng.set_refill_kind_override_for_tests(_refill_kind_override_for_tests)
+	if _cascade_hard_cap_override_for_tests > 0:
+		eng.set_cascade_hard_cap_override_for_tests(_cascade_hard_cap_override_for_tests)
+	return eng
+
+
+## Test-only: force damage resolver failure on next accepted turn.
+func set_damage_resolver_force_fail_for_tests(enabled: bool) -> void:
+	_damage_resolver_force_fail_for_tests = enabled
+
+
+func clear_damage_resolver_force_fail_for_tests() -> void:
+	_damage_resolver_force_fail_for_tests = false
 
 
 func set_rng_state_for_tests(state: int) -> void:
@@ -740,6 +1084,7 @@ func _clear_fields(emit_phase: bool) -> void:
 	_last_cascade_count = 0
 	_selected = Vector2i(-1, -1)
 	_last_events.clear()
+	_last_combat_events.clear()
 	_last_message = ""
 	_encounter.clear()
 	if emit_phase:
@@ -755,6 +1100,19 @@ func _result(ok: bool, changed: bool, error: String) -> Dictionary:
 		"error": error,
 		"active": has_active_runtime(),
 		"phase": _phase,
+	}
+
+
+func _swap_result(ok: bool, accepted: bool, error: String) -> Dictionary:
+	return {
+		"ok": ok,
+		"accepted": accepted,
+		"error": error,
+		"attack_count": 0,
+		"total_damage": 0,
+		"target_hp_before": 0,
+		"target_hp_after": 0,
+		"target_defeated": false,
 	}
 
 

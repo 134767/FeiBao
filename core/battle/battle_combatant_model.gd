@@ -1,4 +1,4 @@
-## Pure combatant domain model (player or enemy). No damage/heal API in 1.1.0.
+## Pure combatant domain model (player or enemy). apply_damage is formal domain API (1.2.0+).
 class_name BattleCombatantModel
 extends RefCounted
 
@@ -252,6 +252,57 @@ static func restore_snapshot(raw: Variant) -> Dictionary:
 	m._attack = d.get("attack") as int
 	m._defense = d.get("defense") as int
 	return {"ok": true, "error": "", "combatant": m}
+
+
+## Formal domain damage API. No heal/revive/shield/status.
+func apply_damage(amount: Variant) -> Dictionary:
+	var base: Dictionary = {
+		"ok": false,
+		"changed": false,
+		"error": "",
+		"requested_damage": 0,
+		"actual_damage": 0,
+		"hp_before": _current_hp,
+		"hp_after": _current_hp,
+		"defeated": _current_hp <= 0,
+	}
+	if typeof(amount) != TYPE_INT:
+		base["error"] = "amount must be TYPE_INT"
+		return base
+	var dmg: int = amount as int
+	base["requested_damage"] = dmg
+	if dmg < 0:
+		base["error"] = "amount must be >= 0"
+		return base
+	var hp_before: int = _current_hp
+	base["hp_before"] = hp_before
+	if dmg == 0:
+		base["ok"] = true
+		base["changed"] = false
+		base["actual_damage"] = 0
+		base["hp_after"] = hp_before
+		base["defeated"] = hp_before <= 0
+		return base
+	if hp_before <= 0:
+		base["ok"] = true
+		base["changed"] = false
+		base["actual_damage"] = 0
+		base["hp_after"] = 0
+		base["defeated"] = true
+		return base
+	var actual: int = mini(dmg, hp_before)
+	_current_hp = hp_before - actual
+	if _current_hp < 0:
+		_current_hp = 0
+	if _current_hp > _max_hp:
+		_current_hp = _max_hp
+	base["ok"] = true
+	base["changed"] = actual > 0
+	base["actual_damage"] = actual
+	base["hp_after"] = _current_hp
+	base["defeated"] = _current_hp <= 0
+	base["error"] = ""
+	return base
 
 
 ## Test-only seam — not used by production Runtime/UI.

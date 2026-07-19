@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 1.1.0** — battle encounter & combatant foundation.
+**Current version: 1.2.0** — player attack & damage foundation.
 
 ## Requirements
 
@@ -22,6 +22,15 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
+## What 1.2.0 Adds
+
+- Deterministic player attacks from board `orb_kinds` aggregation
+- Pure domain `BattleDamageResolver` + `BattleCombatEvent`
+- Active enemy HP damage with atomic board + combat commit
+- Combat events in Runtime snapshot (memory-only)
+- BattleScreen attack log + enemy HP refresh
+- No enemy turn, affinity multipliers, win/loss, or profile mutation
+
 ## What 1.1.0 Adds
 
 - Player combat stat blueprints + original development enemies
@@ -29,7 +38,7 @@ godot --headless --path . --script res://tests/test_runner.gd
 - Memory-only **BattleEncounterModel** (party + enemy combatants with HP)
 - Atomic board + encounter begin/snapshot inside BattleRuntime
 - BattleScreen party/enemy HP status display
-- PlayerProfile schema remains **2**; no damage / AI / win-loss / rewards
+- PlayerProfile schema remains **2**
 
 ## What 1.0.0 Added
 
@@ -43,6 +52,7 @@ godot --headless --path . --script res://tests/test_runner.gd
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
+- `docs/FEIBAO_1.2.0_PLAYER_ATTACK_DAMAGE.md`
 - `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 - `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
 - `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`

@@ -1,10 +1,10 @@
-## Battle board + encounter combatant screen (1.1.0). Session from BattleState; board/encounter from BattleRuntime.
+## Battle board + encounter + player attack screen (1.2.0). Session from BattleState; board/encounter/combat from BattleRuntime.
 extends Control
 
 signal back_requested
 signal leave_requested
 
-const MSG_SHELL: String = "開發樣本：戰鬥單位狀態已建立；傷害與敵人行動尚未啟用。"
+const MSG_SHELL: String = "開發樣本：玩家攻擊與傷害已啟用；敵人行動、目標切換與勝敗尚未啟用。"
 const MSG_NO_SESSION: String = "沒有有效的戰鬥工作階段"
 const MSG_NO_RUNTIME: String = "沒有有效的戰鬥盤面"
 const MSG_CHAR_MISSING: String = "出戰角色定義缺失"
@@ -23,6 +23,9 @@ const TURN_FMT: String = "回合：%d"
 const MATCH_FMT: String = "上次消除：%d"
 const CASCADE_FMT: String = "上次連鎖：%d"
 const HINT_IDLE: String = "點選相鄰兩格交換；同格再點取消"
+const COMBAT_HEADER: String = "本回合攻擊"
+const COMBAT_ZERO: String = "本回合沒有隊員屬性符合消除珠。"
+const COMBAT_DEFEATED: String = "敵人HP已歸零；勝利與下一目標流程尚未啟用。"
 const CELL_MIN: float = 48.0
 const HP_BAR_MIN_H: float = 16.0
 
@@ -59,6 +62,8 @@ const ORB_COLORS: Dictionary = {
 @onready var _mutation_label: Label = %MutationLabel
 @onready var _board_grid: GridContainer = %BoardGrid
 @onready var _error_label: Label = %ErrorLabel
+@onready var _combat_header_label: Label = %CombatHeaderLabel
+@onready var _combat_log_box: VBoxContainer = %CombatLogBox
 
 var _screen_id: StringName = &""
 var _configured: bool = false
@@ -75,6 +80,7 @@ var _cell_buttons: Array[Button] = []
 var _cell_callbacks: Array[Callable] = []
 var _party_summary_cache: String = ""
 var _enemy_summary_cache: String = ""
+var _combat_log_cache: String = ""
 
 
 func _ready() -> void:
@@ -127,6 +133,8 @@ func _bind_runtime_signals() -> void:
 			BattleRuntime.runtime_changed.connect(_on_runtime_changed)
 		if BattleRuntime.has_signal("encounter_changed") and not BattleRuntime.encounter_changed.is_connected(_on_runtime_board_changed):
 			BattleRuntime.encounter_changed.connect(_on_runtime_board_changed)
+		if BattleRuntime.has_signal("combat_changed") and not BattleRuntime.combat_changed.is_connected(_on_runtime_board_changed):
+			BattleRuntime.combat_changed.connect(_on_runtime_board_changed)
 		_runtime_signals_bound = true
 
 
@@ -138,6 +146,8 @@ func _unbind_runtime_signals() -> void:
 			BattleRuntime.runtime_changed.disconnect(_on_runtime_changed)
 		if BattleRuntime.has_signal("encounter_changed") and BattleRuntime.encounter_changed.is_connected(_on_runtime_board_changed):
 			BattleRuntime.encounter_changed.disconnect(_on_runtime_board_changed)
+		if BattleRuntime.has_signal("combat_changed") and BattleRuntime.combat_changed.is_connected(_on_runtime_board_changed):
+			BattleRuntime.combat_changed.disconnect(_on_runtime_board_changed)
 	_runtime_signals_bound = false
 
 
@@ -313,6 +323,7 @@ func _apply_runtime_ui() -> void:
 		_hide_error()
 	_paint_board_from_runtime()
 	_apply_combatant_ui()
+	_apply_combat_log_ui()
 	_update_status_labels()
 	var phase: StringName = BattleRuntime.get_phase()
 	var can_input: bool = (
@@ -396,6 +407,92 @@ func _hide_summary_labels() -> void:
 		_enemy_list_label.visible = false
 		_enemy_list_label.text = ""
 		_enemy_list_label.custom_minimum_size = Vector2(0, 0)
+
+
+func _apply_combat_log_ui() -> void:
+	if _combat_header_label != null:
+		_combat_header_label.text = COMBAT_HEADER
+		_combat_header_label.focus_mode = Control.FOCUS_NONE
+		_combat_header_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _combat_log_box == null:
+		_combat_log_cache = ""
+		return
+	_clear_box_generic(_combat_log_box)
+	_combat_log_box.focus_mode = Control.FOCUS_NONE
+	_combat_log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if not is_instance_valid(BattleRuntime) or not BattleRuntime.has_active_runtime():
+		_combat_log_cache = ""
+		return
+	var events: Array = BattleRuntime.get_last_combat_events()
+	var v: Dictionary = BattleCombatEvent.validate_events(events)
+	if not bool(v.get("ok", false)):
+		# Fail closed: hide log on invalid combat payload.
+		_combat_log_cache = ""
+		return
+	events = v.get("events", []) as Array
+	if events.is_empty():
+		_combat_log_cache = ""
+		return
+	var lines: PackedStringArray = PackedStringArray()
+	var players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
+	var name_by_id: Dictionary = {}
+	for p in players:
+		name_by_id[str(p.get_source_id())] = p.get_display_name()
+	for e in events:
+		if not (e is Dictionary):
+			continue
+		var d: Dictionary = e as Dictionary
+		var t: StringName = d.get("type") as StringName
+		if t == BattleCombatEvent.TYPE_PLAYER_DAMAGE:
+			var aid: StringName = d.get("attacker_id") as StringName
+			var aname: String = str(name_by_id.get(str(aid), str(aid)))
+			var aff: StringName = d.get("affinity") as StringName
+			var row: String = (
+				"%s %s%s 清除%d 計算%d 實際%d HP %d→%d"
+				% [
+					aname,
+					BattleAffinity.symbol(aff),
+					BattleAffinity.display_name(aff),
+					int(d.get("cleared_orb_count", 0)),
+					int(d.get("calculated_damage", 0)),
+					int(d.get("actual_damage", 0)),
+					int(d.get("hp_before", 0)),
+					int(d.get("hp_after", 0)),
+				]
+			)
+			lines.append(row)
+			_combat_log_box.add_child(_make_combat_log_label(row))
+		elif t == BattleCombatEvent.TYPE_PLAYER_COMBAT_COMPLETED:
+			var attack_count: int = int(d.get("attack_count", 0))
+			var total_damage: int = int(d.get("total_damage", 0))
+			var hp_after: int = int(d.get("target_hp_after", 0))
+			if attack_count == 0:
+				_combat_log_box.add_child(_make_combat_log_label(COMBAT_ZERO))
+				lines.append(COMBAT_ZERO)
+			var summary: String = "攻擊次數 %d · 總傷害 %d · 作用中敵人 HP %d" % [attack_count, total_damage, hp_after]
+			_combat_log_box.add_child(_make_combat_log_label(summary))
+			lines.append(summary)
+			if bool(d.get("target_defeated", false)) or hp_after == 0:
+				_combat_log_box.add_child(_make_combat_log_label(COMBAT_DEFEATED))
+				lines.append(COMBAT_DEFEATED)
+	_combat_log_cache = "\n".join(lines)
+
+
+func _make_combat_log_label(text: String) -> Label:
+	var lab := Label.new()
+	lab.text = text
+	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lab.focus_mode = Control.FOCUS_NONE
+	lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lab.add_theme_font_size_override("font_size", 12)
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return lab
+
+
+func _clear_box_generic(box: Container) -> void:
+	for c in box.get_children():
+		box.remove_child(c)
+		c.queue_free()
 
 
 func _clear_combatant_cards() -> void:
@@ -883,6 +980,31 @@ func get_cascade_text() -> String:
 
 func get_mutation_text() -> String:
 	return _mutation_label.text if _mutation_label != null else ""
+
+
+func get_combat_log_text_for_tests() -> String:
+	return _combat_log_cache
+
+
+func get_combat_log_row_count_for_tests() -> int:
+	if _combat_log_box == null:
+		return 0
+	return _combat_log_box.get_child_count()
+
+
+func get_combat_log_row_text_for_tests(index: int) -> String:
+	if _combat_log_box == null or index < 0 or index >= _combat_log_box.get_child_count():
+		return ""
+	var n: Node = _combat_log_box.get_child(index)
+	return (n as Label).text if n is Label else ""
+
+
+func get_combat_header_text_for_tests() -> String:
+	return _combat_header_label.text if _combat_header_label != null else ""
+
+
+func get_combat_log_box_for_tests() -> VBoxContainer:
+	return _combat_log_box
 
 
 func is_error_state_visible() -> bool:

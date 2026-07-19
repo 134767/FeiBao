@@ -455,7 +455,7 @@ func _run_adventure_state_tests() -> void:
 	_assert_true("as_prep_copy_b", prep_b != null)
 	_assert_true("as_prep_not_same_instance", prep_a != prep_b)
 	_assert_eq("as_prep_copy_id", str(prep_a.get_id()), str(prep_b.get_id()))
-	_assert_eq("as_app_version", FeiBaoConstants.APP_VERSION, "1.1.0")
+	_assert_eq("as_app_version", FeiBaoConstants.APP_VERSION, "1.2.0")
 	_assert_eq(
 		"as_path_adventure",
 		FeiBaoConstants.PATH_ADVENTURE_SCREEN,

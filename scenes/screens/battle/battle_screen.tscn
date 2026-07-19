@@ -174,6 +174,21 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "上次連鎖：0"
 
+[node name="CombatHeaderLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "本回合攻擊"
+focus_mode = 0
+mouse_filter = 2
+
+[node name="CombatLogBox" type="VBoxContainer" parent="Margin/RootVBox/BodyScroll/BodyContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 2
+focus_mode = 0
+mouse_filter = 2
+
 [node name="HintLabel" type="Label" parent="Margin/RootVBox/BodyScroll/BodyContent"]
 unique_name_in_owner = true
 layout_mode = 2
