@@ -45,6 +45,22 @@ func get_active_enemy() -> BattleCombatantModel:
 	return _enemy_combatants[_active_enemy_index].duplicate_model()
 
 
+## Domain-only: apply damage to the active enemy combatant (mutates self).
+func apply_damage_to_active_enemy(amount: Variant) -> Dictionary:
+	if not _built or _active_enemy_index < 0 or _active_enemy_index >= _enemy_combatants.size():
+		return {
+			"ok": false,
+			"changed": false,
+			"error": "no active enemy",
+			"requested_damage": 0,
+			"actual_damage": 0,
+			"hp_before": 0,
+			"hp_after": 0,
+			"defeated": true,
+		}
+	return _enemy_combatants[_active_enemy_index].apply_damage(amount)
+
+
 ## Build from stage + party IDs. Fail closed without mutating self.
 static func build_from_session(stage_id: StringName, party_ids: Array[StringName]) -> Dictionary:
 	if String(stage_id).is_empty():
