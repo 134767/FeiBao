@@ -44,11 +44,11 @@ PlayerProfile remains **schema 2**. Stage presentation catalog remains **schema 
 
 Begin order (candidate then one-shot commit):
 
-1. Validate BattleState binding  
-2–5. Build candidate encounter  
-6–7. Build candidate board (isolated engine)  
-8. Commit board + encounter + binding  
-9. Emit signals  
+1. Validate BattleState binding
+2–5. Build candidate encounter
+6–7. Build candidate board (isolated engine)
+8. Commit board + encounter + binding
+9. Emit signals
 
 Failure: runtime completely unchanged; zero signals.
 
