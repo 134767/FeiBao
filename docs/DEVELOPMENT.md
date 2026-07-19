@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **1.0.0**
+- **App version:** **1.1.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -88,6 +88,17 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Global RNG isolation + forced hard-cap fixture + keyboard/responsive rect evidence
 - Enter creates state + runtime; leave clears both with dual rollback
 - See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
+
+## Battle Encounter & Combatants (1.1.0)
+
+- Combat stats / enemy / stage-encounter catalogs; BattleEncounterModel
+- Catalog fields use whole-JSON-number validation (10 / 10.0 ok; 10.5 / bool / string / null rejected)
+- Atomic board+encounter begin; snapshot includes `encounter` (TYPE_INT combatant fields)
+- Test-only catalog path overrides under `user://feibao_tests/` or `res://tests/fixtures/`
+- BattleScreen: card-only visible combatants (cached summary getters); multi-column cards on wide viewports
+- Evidence suite (GROK-038): forced turn, Adventure exact transactions, 3×3 snapshot matrix, exact cards, Space key outcomes, SubViewport scroll-visible containment, separate assertion integrity scanner
+- No damage or victory; board turns leave HP / active enemy unchanged
+- See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
 ## Git Branch & PR Rules
 

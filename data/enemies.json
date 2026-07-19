@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "catalog_kind": "development_seed",
+  "enemies": [
+    {
+      "enemy_id": "training_sprout",
+      "display_name": "訓練幼芽",
+      "affinity": "leaf",
+      "max_hp": 40,
+      "attack": 8,
+      "defense": 3,
+      "visual_symbol": "◇"
+    },
+    {
+      "enemy_id": "training_droplet",
+      "display_name": "訓練水滴",
+      "affinity": "tide",
+      "max_hp": 48,
+      "attack": 9,
+      "defense": 4,
+      "visual_symbol": "○"
+    },
+    {
+      "enemy_id": "training_emberling",
+      "display_name": "訓練炎雛",
+      "affinity": "ember",
+      "max_hp": 36,
+      "attack": 11,
+      "defense": 2,
+      "visual_symbol": "△"
+    }
+  ]
+}

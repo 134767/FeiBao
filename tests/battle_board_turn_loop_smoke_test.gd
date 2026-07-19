@@ -1438,7 +1438,11 @@ func _run_enter_leave_screen_tests() -> void:
 	var buttons: Array = screen.call("get_cell_buttons") as Array
 	_assert_eq("ui_cells", buttons.size(), 30)
 	_assert_true("ui_turn", str(screen.call("get_turn_text")).find("0") >= 0)
-	_assert_true("ui_shell", str(screen.call("get_shell_status_text")).find("盤面") >= 0)
+	_assert_true(
+		"ui_shell",
+		str(screen.call("get_shell_status_text")).find("戰鬥單位") >= 0
+		or str(screen.call("get_shell_status_text")).find("盤面") >= 0
+	)
 
 	# Selection visible via press
 	screen.call("press_cell_for_test", 0, 0)
@@ -1844,9 +1848,29 @@ func _runtime_exact(snap: Dictionary) -> bool:
 		return false
 	if str(BattleRuntime.get_last_message()) != str(snap.get("last_message", "")):
 		return false
-	return BattleResolutionEvent.events_equal(
+	if not BattleResolutionEvent.events_equal(
 		snap.get("last_resolution_events", []) as Array,
 		BattleRuntime.get_last_resolution_events()
+	):
+		return false
+	# 1.1.0 encounter deep equality (canonical inactive when key absent on legacy snaps)
+	var expected_enc: Dictionary = {}
+	if snap.has("encounter") and snap.get("encounter") is Dictionary:
+		expected_enc = snap.get("encounter") as Dictionary
+	else:
+		expected_enc = {
+			"player_combatants": [],
+			"enemy_combatants": [],
+			"active_enemy_index": -1,
+		}
+	var actual_enc: Dictionary = BattleRuntime.get_encounter_snapshot()
+	var exp_rest: Dictionary = BattleEncounterModel.restore_snapshot(expected_enc)
+	var act_rest: Dictionary = BattleEncounterModel.restore_snapshot(actual_enc)
+	if not bool(exp_rest.get("ok", false)) or not bool(act_rest.get("ok", false)):
+		return false
+	return BattleEncounterModel.equals(
+		exp_rest.get("encounter") as BattleEncounterModel,
+		act_rest.get("encounter") as BattleEncounterModel
 	)
 
 

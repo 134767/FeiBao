@@ -1,10 +1,11 @@
-## In-memory battle board runtime (1.0.0). No disk, navigation, or profile mutation.
-## Full session binding: area + stage + party (order) + leader.
+## In-memory battle board + encounter runtime (1.1.0). No disk, navigation, or profile mutation.
+## Full session binding: area + stage + party (order) + leader + encounter combatants.
 extends Node
 
 signal runtime_changed(active: bool)
 signal board_changed
 signal phase_changed(phase: StringName)
+signal encounter_changed
 
 const PHASE_INACTIVE: StringName = &"inactive"
 const PHASE_READY: StringName = &"ready"
@@ -37,6 +38,7 @@ var _phase: StringName = PHASE_INACTIVE
 var _selected: Vector2i = Vector2i(-1, -1)
 var _last_events: Array = []
 var _last_message: String = ""
+var _encounter: BattleEncounterModel = BattleEncounterModel.new()
 
 
 func reset_runtime_state_for_tests() -> void:
@@ -117,7 +119,31 @@ func get_rng_state() -> int:
 	return _engine.get_rng_state()
 
 
-## Begin runtime from active BattleState session. Deterministic seed from full session fields.
+func has_active_encounter() -> bool:
+	return _encounter != null and _encounter.is_valid()
+
+
+func get_player_combatants() -> Array[BattleCombatantModel]:
+	return _encounter.get_player_combatants()
+
+
+func get_enemy_combatants() -> Array[BattleCombatantModel]:
+	return _encounter.get_enemy_combatants()
+
+
+func get_active_enemy() -> BattleCombatantModel:
+	return _encounter.get_active_enemy()
+
+
+func get_active_enemy_index() -> int:
+	return _encounter.get_active_enemy_index()
+
+
+func get_encounter_snapshot() -> Dictionary:
+	return _encounter.capture_snapshot()
+
+
+## Begin runtime from active BattleState. Candidate encounter+board then one-shot commit.
 func begin_from_battle_session() -> Dictionary:
 	if not is_instance_valid(BattleState) or not BattleState.has_active_session():
 		return _result(false, false, "no active BattleState session")
@@ -133,25 +159,83 @@ func begin_from_battle_session() -> Dictionary:
 	if party[0] != leader:
 		return _result(false, false, "leader must be party index 0")
 
-	# Same full session already active → idempotent.
+	# Same full session already active → idempotent (zero signals).
 	if (
 		has_active_runtime()
 		and _session_area_id == area_id
 		and _session_stage_id == stage_id
 		and _party_ids_equal(_session_party_character_ids, party)
 		and _session_leader_character_id == leader
+		and _encounter.is_valid()
 	):
 		return _result(true, false, "")
 
-	# Different active runtime (including same area/stage but different party/leader) → fail closed.
 	if has_active_runtime():
 		return _result(false, false, "active runtime already exists")
 
+	# 1–5: build candidate encounter (no mutation of self yet)
+	var enc_res: Dictionary = BattleEncounterModel.build_from_session(stage_id, party)
+	if not bool(enc_res.get("ok", false)):
+		return _result(false, false, str(enc_res.get("error", "encounter build failed")))
+	var next_enc: BattleEncounterModel = enc_res.get("encounter") as BattleEncounterModel
+	if next_enc == null or not next_enc.is_valid():
+		return _result(false, false, "encounter build returned invalid")
+
+	# 6–7: candidate board via isolated engine (do not touch live RNG/board)
 	var seed: int = BattleBoardEngine.derive_seed_from_session(area_id, stage_id, party, leader)
-	var gen: Dictionary = _engine.generate_initial_board(seed)
+	var temp_engine := BattleBoardEngine.new()
+	var gen: Dictionary = temp_engine.generate_initial_board(seed)
 	if not bool(gen.get("ok", false)):
 		return _result(false, false, str(gen.get("error", "board generation failed")))
+	var cells: Array = gen.get("cells", []) as Array
+	if cells.size() != BattleBoardModel.CELL_COUNT:
+		return _result(false, false, "invalid board generation size")
+	for k in cells:
+		if not BattleOrbKind.is_valid(k as StringName):
+			return _result(false, false, "invalid board orb kind")
 
+	# 8–9: one-shot commit
+	_active = true
+	_session_area_id = area_id
+	_session_stage_id = stage_id
+	_session_party_character_ids = party.duplicate()
+	_session_leader_character_id = leader
+	_board.set_cells(cells)
+	_engine.set_rng_state(int(gen.get("rng_state", 1)))
+	_turn_count = 0
+	_last_match_count = 0
+	_last_cascade_count = 0
+	_last_events.clear()
+	_last_message = ""
+	_selected = Vector2i(-1, -1)
+	_encounter.assign_from(next_enc)
+	_set_phase(PHASE_READY)
+	runtime_changed.emit(true)
+	board_changed.emit()
+	encounter_changed.emit()
+	return _result(true, true, "")
+
+
+## Test seam: begin from explicit seed while requiring active BattleState binding.
+func begin_from_seed_for_tests(seed: int) -> Dictionary:
+	if not is_instance_valid(BattleState) or not BattleState.has_active_session():
+		return _result(false, false, "no active BattleState session")
+	if has_active_runtime():
+		return _result(false, false, "active runtime already exists")
+	var area_id: StringName = BattleState.get_area_id()
+	var stage_id: StringName = BattleState.get_stage_id()
+	var party: Array[StringName] = BattleState.get_party_character_ids()
+	var leader: StringName = BattleState.get_leader_character_id()
+	var enc_res: Dictionary = BattleEncounterModel.build_from_session(stage_id, party)
+	if not bool(enc_res.get("ok", false)):
+		return _result(false, false, str(enc_res.get("error", "encounter build failed")))
+	var next_enc: BattleEncounterModel = enc_res.get("encounter") as BattleEncounterModel
+	if next_enc == null or not next_enc.is_valid():
+		return _result(false, false, "encounter build returned invalid")
+	var temp_engine := BattleBoardEngine.new()
+	var gen: Dictionary = temp_engine.generate_initial_board(seed)
+	if not bool(gen.get("ok", false)):
+		return _result(false, false, str(gen.get("error", "board generation failed")))
 	_active = true
 	_session_area_id = area_id
 	_session_stage_id = stage_id
@@ -165,37 +249,11 @@ func begin_from_battle_session() -> Dictionary:
 	_last_events.clear()
 	_last_message = ""
 	_selected = Vector2i(-1, -1)
+	_encounter.assign_from(next_enc)
 	_set_phase(PHASE_READY)
 	runtime_changed.emit(true)
 	board_changed.emit()
-	return _result(true, true, "")
-
-
-## Test seam: begin from explicit seed while requiring active BattleState binding.
-func begin_from_seed_for_tests(seed: int) -> Dictionary:
-	if not is_instance_valid(BattleState) or not BattleState.has_active_session():
-		return _result(false, false, "no active BattleState session")
-	if has_active_runtime():
-		return _result(false, false, "active runtime already exists")
-	var gen: Dictionary = _engine.generate_initial_board(seed)
-	if not bool(gen.get("ok", false)):
-		return _result(false, false, str(gen.get("error", "board generation failed")))
-	_active = true
-	_session_area_id = BattleState.get_area_id()
-	_session_stage_id = BattleState.get_stage_id()
-	_session_party_character_ids = BattleState.get_party_character_ids()
-	_session_leader_character_id = BattleState.get_leader_character_id()
-	_board.set_cells(gen.get("cells", []) as Array)
-	_engine.set_rng_state(int(gen.get("rng_state", 1)))
-	_turn_count = 0
-	_last_match_count = 0
-	_last_cascade_count = 0
-	_last_events.clear()
-	_last_message = ""
-	_selected = Vector2i(-1, -1)
-	_set_phase(PHASE_READY)
-	runtime_changed.emit(true)
-	board_changed.emit()
+	encounter_changed.emit()
 	return _result(true, true, "")
 
 
@@ -207,6 +265,7 @@ func clear_runtime() -> Dictionary:
 	if was_active:
 		runtime_changed.emit(false)
 		board_changed.emit()
+		encounter_changed.emit()
 	return _result(true, was_active, "")
 
 
@@ -229,6 +288,7 @@ func capture_runtime_snapshot() -> Dictionary:
 		"last_cascade_count": _last_cascade_count,
 		"last_resolution_events": BattleResolutionEvent.duplicate_events(_last_events),
 		"last_message": _last_message,
+		"encounter": _encounter.capture_snapshot(),
 	}
 
 
@@ -261,6 +321,14 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		return _result(false, false, "invalid resolution events: %s" % str(events_check.get("error", "")))
 	var next_events: Array = events_check.get("events", []) as Array
 	var next_msg: String = str(snapshot.get("last_message", ""))
+	if not snapshot.has("encounter"):
+		return _result(false, false, "missing encounter")
+	var enc_check: Dictionary = BattleEncounterModel.restore_snapshot(snapshot.get("encounter"))
+	if not bool(enc_check.get("ok", false)):
+		return _result(false, false, "invalid encounter: %s" % str(enc_check.get("error", "")))
+	var next_enc: BattleEncounterModel = enc_check.get("encounter") as BattleEncounterModel
+	if next_enc == null:
+		return _result(false, false, "invalid encounter model")
 
 	# RESOLVING is not restorable (no mid-resolution resume state in 1.0.0).
 	if next_phase == PHASE_RESOLVING:
@@ -308,6 +376,9 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		)
 		if not active_err.is_empty():
 			return _result(false, false, active_err)
+		var enc_bind_err: String = _validate_encounter_binding(next_enc, next_area, next_stage, next_party, next_leader)
+		if not enc_bind_err.is_empty():
+			return _result(false, false, enc_bind_err)
 	else:
 		var inactive_err: String = _validate_inactive_canonical(
 			next_phase,
@@ -327,6 +398,10 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		)
 		if not inactive_err.is_empty():
 			return _result(false, false, inactive_err)
+		if next_enc.is_valid():
+			return _result(false, false, "inactive snapshot requires inactive encounter")
+		if next_enc.get_active_enemy_index() != BattleEncounterModel.INACTIVE_ACTIVE_INDEX:
+			return _result(false, false, "inactive encounter active_enemy_index must be -1")
 
 	# Idempotent identical restore (no signals).
 	if (
@@ -345,6 +420,7 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 		and _last_message == next_msg
 		and _board.equals_cells(next_cells)
 		and BattleResolutionEvent.events_equal(_last_events, next_events)
+		and BattleEncounterModel.equals(_encounter, next_enc)
 	):
 		return _result(true, false, "")
 
@@ -361,9 +437,11 @@ func restore_runtime_snapshot(snapshot: Dictionary) -> Dictionary:
 	_last_cascade_count = next_cascade
 	_last_events = next_events
 	_last_message = next_msg
+	_encounter.assign_from(next_enc)
 	_set_phase(next_phase)
 	runtime_changed.emit(_active)
 	board_changed.emit()
+	encounter_changed.emit()
 	return _result(true, true, "")
 
 
@@ -398,6 +476,42 @@ func _validate_active_snapshot(
 			return "active board requires filled valid cells"
 	if phase == PHASE_INACTIVE:
 		return "active snapshot cannot be inactive phase"
+	return ""
+
+
+func _validate_encounter_binding(
+	enc: BattleEncounterModel,
+	_area: StringName,
+	stage: StringName,
+	party: Array[StringName],
+	leader: StringName
+) -> String:
+	if enc == null or not enc.is_valid():
+		return "active snapshot requires active encounter"
+	var party_c: Array[BattleCombatantModel] = enc.get_player_combatants()
+	if party_c.size() != party.size():
+		return "encounter party size mismatch"
+	for i in party.size():
+		if party_c[i].get_source_id() != party[i]:
+			return "encounter party id mismatch"
+	if party_c[0].get_source_id() != leader:
+		return "encounter leader mismatch"
+	var enemies: Array[BattleCombatantModel] = enc.get_enemy_combatants()
+	if enemies.is_empty():
+		return "encounter requires enemies"
+	var aei: int = enc.get_active_enemy_index()
+	if aei < 0 or aei >= enemies.size():
+		return "invalid active_enemy_index"
+	# Enemy order must match StageEncounterCatalog
+	var link: Dictionary = StageEncounterCatalog.find_encounter(stage)
+	if not bool(link.get("ok", false)):
+		return "stage encounter missing for binding"
+	var expected_ids: Array = (link.get("encounter", {}) as Dictionary).get("enemy_ids", []) as Array
+	if expected_ids.size() != enemies.size():
+		return "enemy count mismatch catalog"
+	for i in enemies.size():
+		if enemies[i].get_source_id() != (expected_ids[i] as StringName):
+			return "enemy order mismatch catalog"
 	return ""
 
 
@@ -627,6 +741,7 @@ func _clear_fields(emit_phase: bool) -> void:
 	_selected = Vector2i(-1, -1)
 	_last_events.clear()
 	_last_message = ""
+	_encounter.clear()
 	if emit_phase:
 		_set_phase(PHASE_INACTIVE)
 	else:
