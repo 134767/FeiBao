@@ -150,6 +150,18 @@ func _seed_party3(stage_id: StringName = &"dev_stage_mist_03") -> void:
 	_assert_true("seed_p3_bs", bool(BattleState.begin_from_prepared_stage().get("ok", false)))
 
 
+func _seed_dual_ember(stage_id: StringName = &"dev_stage_beginner_01") -> void:
+	PlayerData.configure_test_storage_path("user://feibao_tests/pad_dual_ember")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	PlayerData.grant_character(&"partner_e")
+	PlayerData.add_party_member(&"partner_e")
+	_reset_domain()
+	AdventureState.prepare_stage(stage_id)
+	_assert_true("seed_dual_bs", bool(BattleState.begin_from_prepared_stage().get("ok", false)))
+	_assert_eq("seed_dual_n", BattleState.get_party_character_ids().size(), 2)
+
+
 func _match_ready_board() -> Array[StringName]:
 	var out: Array[StringName] = []
 	out.resize(30)
@@ -465,6 +477,55 @@ func _run_combat_event_schema_k2() -> void:
 	_assert_true(
 		"k2_sum_mid",
 		not bool(BattleCombatEvent.validate_events([sum, dmg]).get("ok", true))
+	)
+	# B1–B4 contract closeout failure cases
+	var z_hp_mut: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		1, 0, 0, &"training_sprout", 40, 30, false
+	)
+	_assert_true(
+		"k2_z_hp_mismatch",
+		not bool(BattleCombatEvent.validate_events([z_hp_mut]).get("ok", true))
+	)
+	var z_tot1: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		1, 0, 1, &"training_sprout", 40, 40, false
+	)
+	_assert_true(
+		"k2_z_total1",
+		not bool(BattleCombatEvent.validate_events([z_tot1]).get("ok", true))
+	)
+	var under: Dictionary = BattleCombatEvent.make_player_damage(
+		1, &"feibao_dev", &"training_sprout", &"ember", 3, 14, 3, 11, 5, 40, 35
+	)
+	var under_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		1, 1, 5, &"training_sprout", 40, 35, false
+	)
+	_assert_true(
+		"k2_under",
+		not bool(BattleCombatEvent.validate_events([under, under_sum]).get("ok", true))
+	)
+	var lethal_under: Dictionary = BattleCombatEvent.make_player_damage(
+		1, &"feibao_dev", &"training_sprout", &"ember", 3, 14, 3, 100, 19, 20, 1
+	)
+	var lethal_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		1, 1, 19, &"training_sprout", 20, 1, false
+	)
+	_assert_true(
+		"k2_lethal_under",
+		not bool(BattleCombatEvent.validate_events([lethal_under, lethal_sum]).get("ok", true))
+	)
+	var zero_hp_dmg: Dictionary = BattleCombatEvent.make_player_damage(
+		1, &"feibao_dev", &"training_sprout", &"ember", 3, 14, 3, 11, 0, 0, 0
+	)
+	_assert_true(
+		"k2_hp0_damage",
+		not bool(BattleCombatEvent.validate_event(zero_hp_dmg).get("ok", true))
+	)
+	var bad_delta: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		1, 1, 10, &"training_sprout", 40, 29, false
+	)
+	_assert_true(
+		"k2_sum_delta",
+		not bool(BattleCombatEvent.validate_events([dmg, bad_delta]).get("ok", true))
 	)
 	print("[INFO] K2 combat event schema passed")
 
@@ -923,6 +984,119 @@ func _run_snapshot_matrix_k10() -> void:
 	var m16: Dictionary = before.duplicate(true)
 	m16["last_combat_events"] = [Callable()]
 	cases.append(["callable", m16])
+	# E1: fabricated zero-attack with HP mutation
+	var e1: Dictionary = before.duplicate(true)
+	var e1_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		int(before.get("turn_count", 1)),
+		0,
+		0,
+		&"training_sprout",
+		40,
+		30,
+		false
+	)
+	e1["last_combat_events"] = [e1_sum]
+	var e1_enc: Dictionary = (e1.get("encounter") as Dictionary).duplicate(true)
+	(((e1_enc.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = 30
+	e1["encounter"] = e1_enc
+	cases.append(["e1_zero_hp_mut", e1])
+	# E2: missing eligible attacker (ember board, zero summary, HP unchanged)
+	var e2: Dictionary = before.duplicate(true)
+	var hp_start: int = int(
+		(((before.get("encounter") as Dictionary).get("enemy_combatants") as Array)[0] as Dictionary)
+		.get("current_hp", 40)
+	)
+	# summary before should be pre-damage; use chain from original damage if present
+	var orig_ce: Array = before.get("last_combat_events", []) as Array
+	var t_before: int = 40
+	if not orig_ce.is_empty():
+		var os: Dictionary = orig_ce[orig_ce.size() - 1] as Dictionary
+		t_before = int(os.get("target_hp_before", 40))
+	var e2_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		int(before.get("turn_count", 1)),
+		0,
+		0,
+		&"training_sprout",
+		t_before,
+		t_before,
+		t_before == 0
+	)
+	e2["last_combat_events"] = [e2_sum]
+	var e2_enc: Dictionary = (e2.get("encounter") as Dictionary).duplicate(true)
+	(((e2_enc.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = t_before
+	e2["encounter"] = e2_enc
+	cases.append(["e2_miss_attacker", e2])
+	# E3: under-damage (schema-level reject under B1)
+	var e3: Dictionary = before.duplicate(true)
+	var e3_dmg: Dictionary = BattleCombatEvent.make_player_damage(
+		int(before.get("turn_count", 1)),
+		&"feibao_dev",
+		&"training_sprout",
+		&"ember",
+		3,
+		14,
+		3,
+		11,
+		5,
+		t_before,
+		t_before - 5
+	)
+	var e3_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		int(before.get("turn_count", 1)),
+		1,
+		5,
+		&"training_sprout",
+		t_before,
+		t_before - 5,
+		false
+	)
+	e3["last_combat_events"] = [e3_dmg, e3_sum]
+	var e3_enc: Dictionary = (e3.get("encounter") as Dictionary).duplicate(true)
+	(((e3_enc.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = t_before - 5
+	e3["encounter"] = e3_enc
+	cases.append(["e3_under", e3])
+	# E5: extra attacker (affinity without enough orbs) — tide damage with ember-only clear
+	var e5: Dictionary = before.duplicate(true)
+	var e5_extra: Dictionary = BattleCombatEvent.make_player_damage(
+		int(before.get("turn_count", 1)),
+		&"partner_a",
+		&"training_sprout",
+		&"tide",
+		3,
+		12,
+		3,
+		9,
+		9,
+		t_before,
+		t_before - 9
+	)
+	# Keep original first attack if present, then illegal second
+	var e5_events: Array = []
+	if not orig_ce.is_empty() and orig_ce.size() >= 2:
+		var od: Dictionary = (orig_ce[0] as Dictionary).duplicate(true)
+		e5_events.append(od)
+		e5_extra["hp_before"] = int(od.get("hp_after", t_before))
+		e5_extra["actual_damage"] = mini(9, int(e5_extra["hp_before"]))
+		e5_extra["hp_after"] = int(e5_extra["hp_before"]) - int(e5_extra["actual_damage"])
+		e5_extra["calculated_damage"] = 9
+		e5_events.append(e5_extra)
+		var e5_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+			int(before.get("turn_count", 1)),
+			2,
+			int(od.get("actual_damage", 0)) + int(e5_extra["actual_damage"]),
+			&"training_sprout",
+			int(od.get("hp_before", t_before)),
+			int(e5_extra["hp_after"]),
+			int(e5_extra["hp_after"]) == 0
+		)
+		e5_events.append(e5_sum)
+		e5["last_combat_events"] = e5_events
+		var e5_enc: Dictionary = (e5.get("encounter") as Dictionary).duplicate(true)
+		(((e5_enc.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = int(
+			e5_extra["hp_after"]
+		)
+		e5["encounter"] = e5_enc
+		cases.append(["e5_extra_attacker", e5])
 	for c in cases:
 		var tag: String = str(c[0])
 		var bad: Dictionary = c[1] as Dictionary
@@ -931,7 +1105,40 @@ func _run_snapshot_matrix_k10() -> void:
 		_assert_true("k10_%s_exact" % tag, _runtime_exact(before))
 		_assert_sig_zero("k10_%s" % tag, sigs, base)
 	_disconnect_sigs(sigs)
-	BattleRuntime.clear_refill_kind_override_for_tests()
+	# E4: missing second attacker with dual-ember party
+	_seed_dual_ember()
+	_assert_true("k10e4_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+	_assert_true("k10e4_set", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
+	_assert_true("k10e4_acc", bool(BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0)).get("accepted", false)))
+	var full: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	var full_ce: Array = full.get("last_combat_events", []) as Array
+	_assert_true("k10e4_multi", full_ce.size() >= 3)
+	var only_first: Array = [full_ce[0].duplicate(true)]
+	var fd: Dictionary = only_first[0] as Dictionary
+	var only_sum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		int(fd.get("turn_count", 1)),
+		1,
+		int(fd.get("actual_damage", 0)),
+		fd.get("target_id") as StringName,
+		int(fd.get("hp_before", 0)),
+		int(fd.get("hp_after", 0)),
+		int(fd.get("hp_after", 0)) == 0
+	)
+	only_first.append(only_sum)
+	var e4: Dictionary = full.duplicate(true)
+	e4["last_combat_events"] = only_first
+	var e4_enc: Dictionary = (e4.get("encounter") as Dictionary).duplicate(true)
+	(((e4_enc.get("enemy_combatants", []) as Array)[0]) as Dictionary)["current_hp"] = int(
+		fd.get("hp_after", 0)
+	)
+	e4["encounter"] = e4_enc
+	var sigs4: Dictionary = _connect_sigs()
+	var base4: Dictionary = _sig_base(sigs4)
+	var r4: Dictionary = BattleRuntime.restore_runtime_snapshot(e4)
+	_assert_true("k10_e4_miss_second_fail", not bool(r4.get("ok", true)))
+	_assert_true("k10_e4_exact", _runtime_exact(full))
+	_assert_sig_zero("k10_e4", sigs4, base4)
+	_disconnect_sigs(sigs4)
 	print("[INFO] K10 snapshot matrix passed")
 
 
@@ -942,6 +1149,29 @@ func _run_screen_k11() -> void:
 	_assert_true("k11_set", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
 	_assert_true("k11_acc", bool(BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0)).get("accepted", false)))
 	var combat: Array = BattleRuntime.get_last_combat_events()
+	_assert_true("k11_combat_n", combat.size() >= 2)
+	var dmg: Dictionary = combat[0] as Dictionary
+	var sum_ev: Dictionary = combat[combat.size() - 1] as Dictionary
+	var players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
+	_assert_true("k11_p0", not players.is_empty())
+	var expected_row: String = (
+		"%s %s%s 清除%d 計算%d 實際%d HP %d→%d"
+		% [
+			players[0].get_display_name(),
+			BattleAffinity.symbol(dmg.get("affinity") as StringName),
+			BattleAffinity.display_name(dmg.get("affinity") as StringName),
+			int(dmg.get("cleared_orb_count", 0)),
+			int(dmg.get("calculated_damage", 0)),
+			int(dmg.get("actual_damage", 0)),
+			int(dmg.get("hp_before", 0)),
+			int(dmg.get("hp_after", 0)),
+		]
+	)
+	var expected_summary: String = "攻擊次數 %d · 總傷害 %d · 作用中敵人 HP %d" % [
+		int(sum_ev.get("attack_count", 0)),
+		int(sum_ev.get("total_damage", 0)),
+		int(sum_ev.get("target_hp_after", 0)),
+	]
 	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
 	var screen: Control = packed.instantiate() as Control
 	_tree.root.add_child(screen)
@@ -951,25 +1181,24 @@ func _run_screen_k11() -> void:
 	var rows: int = int(screen.call("get_combat_log_row_count_for_tests"))
 	_assert_true("k11_rows", rows >= 2)
 	var r0: String = str(screen.call("get_combat_log_row_text_for_tests", 0))
-	_assert_true("k11_name", r0.find("飛寶") >= 0 or r0.find("feibao") >= 0 or r0.length() > 0)
-	var dmg: Dictionary = combat[0] as Dictionary
-	_assert_true("k11_cleared", r0.find(str(int(dmg.get("cleared_orb_count", -1)))) >= 0)
-	_assert_true("k11_calc", r0.find(str(int(dmg.get("calculated_damage", -1)))) >= 0)
-	_assert_true("k11_act", r0.find(str(int(dmg.get("actual_damage", -1)))) >= 0)
-	var summary: String = str(screen.call("get_combat_log_text_for_tests"))
-	_assert_true("k11_sum", summary.find("總傷害") >= 0)
-	_assert_true("k11_no_victory", summary.find("勝利！") < 0)
-	_assert_true("k11_no_enemy_turn", summary.find("敵人攻擊") < 0)
-	# repeated configure
+	_assert_eq("k11_row_exact", r0, expected_row)
+	var r_sum: String = str(screen.call("get_combat_log_row_text_for_tests", rows - 1))
+	# last row may be defeated notice; find summary among rows
+	var found_sum: bool = false
+	for i in rows:
+		if str(screen.call("get_combat_log_row_text_for_tests", i)) == expected_summary:
+			found_sum = true
+			break
+	_assert_true("k11_sum_exact", found_sum)
+	var log_all: String = str(screen.call("get_combat_log_text_for_tests"))
+	_assert_true("k11_no_victory", log_all.find("勝利！") < 0)
+	_assert_true("k11_no_enemy_turn", log_all.find("敵人攻擊") < 0)
 	var n0: int = int(screen.call("get_combat_log_row_count_for_tests"))
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
 	_assert_eq("k11_cfg_idem", int(screen.call("get_combat_log_row_count_for_tests")), n0)
-	# leave still usable
 	_assert_true("k11_leave_btn", screen.has_method("press_leave_for_test"))
 	# zero attack notice via tide board
-	_assert_true("k11_set2", BattleRuntime.set_board_cells_for_tests(_no_match_board()))
-	# rebuild tide match board
 	var board: Array[StringName] = BattleRuntime.get_board_cells()
 	board[0] = BattleOrbKind.TIDE
 	board[1] = BattleOrbKind.TIDE
@@ -983,7 +1212,6 @@ func _run_screen_k11() -> void:
 	await _tree.process_frame
 	var ztxt: String = str(screen.call("get_combat_log_text_for_tests"))
 	_assert_true("k11_zero", ztxt.find("本回合沒有隊員屬性符合消除珠") >= 0)
-	# defeated notice: set low HP with empty combat (binding would reject mismatched combat HP)
 	var snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	(((snap.get("encounter") as Dictionary).get("enemy_combatants") as Array)[0] as Dictionary)["current_hp"] = 1
 	snap["last_combat_events"] = []
@@ -999,7 +1227,6 @@ func _run_screen_k11() -> void:
 	_assert_true("k11_defeated", dtxt.find("敵人HP已歸零") >= 0)
 	screen.queue_free()
 	await _tree.process_frame
-	BattleRuntime.clear_refill_kind_override_for_tests()
 	print("[INFO] K11 screen passed")
 
 
@@ -1010,68 +1237,160 @@ func _run_responsive_k12() -> void:
 	_assert_true("k12_set", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
 	_assert_true("k12_acc", bool(BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0)).get("accepted", false)))
 	for size in [Vector2(360, 640), Vector2(390, 844), Vector2(720, 1280)]:
-		var tag: String = "%dx%d" % [int(size.x), int(size.y)]
-		var host := SubViewport.new()
-		host.size = Vector2i(int(size.x), int(size.y))
-		host.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-		_tree.root.add_child(host)
-		var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
-		var screen: Control = packed.instantiate() as Control
-		screen.set_anchors_preset(Control.PRESET_FULL_RECT)
-		host.add_child(screen)
-		screen.call("configure_screen", &"battle")
-		for _i in 6:
-			await _tree.process_frame
-		var scroll: ScrollContainer = screen.get_node_or_null("%BodyScroll") as ScrollContainer
-		_assert_true("k12_%s_scroll" % tag, scroll != null)
-		# one vertical scroll container
-		var nested: int = 0
-		_count_vscroll(screen, nested)
-		# horizontal containment
-		if scroll != null:
-			_assert_true("k12_%s_h" % tag, scroll.get_h_scroll_bar() == null or scroll.get_h_scroll_bar().max_value <= 0.5 or not scroll.get_h_scroll_bar().visible or scroll.scroll_horizontal == 0)
-		# cells 48
-		var cells: Array = []
-		var grid: GridContainer = screen.get_node_or_null("%BoardGrid") as GridContainer
-		if grid != null and grid.get_child_count() > 0:
-			var btn: Control = grid.get_child(0) as Control
-			_assert_true("k12_%s_cell" % tag, btn.size.x >= 48.0 - 0.5 and btn.size.y >= 48.0 - 0.5)
-		# hp bars 16
-		var e_cards: Array = screen.call("get_enemy_cards_for_tests") as Array
-		if not e_cards.is_empty():
-			var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", e_cards[0]) as ProgressBar
-			if bar != null:
-				_assert_true("k12_%s_bar" % tag, bar.size.y >= 16.0 - 0.5 or bar.custom_minimum_size.y >= 16.0)
-		# log not focusable
-		var log_box: VBoxContainer = screen.call("get_combat_log_box_for_tests") as VBoxContainer
-		if log_box != null:
-			_assert_eq("k12_%s_log_focus" % tag, log_box.focus_mode, Control.FOCUS_NONE)
-		# back/leave 48
-		var back: Button = screen.get_node_or_null("%BackButton") as Button
-		var leave: Button = screen.get_node_or_null("%LeaveButton") as Button
-		if back != null:
-			_assert_true("k12_%s_back" % tag, back.size.y >= 48.0 - 0.5 or back.custom_minimum_size.y >= 48.0)
-		if leave != null:
-			_assert_true("k12_%s_leave" % tag, leave.size.y >= 48.0 - 0.5 or leave.custom_minimum_size.y >= 48.0)
-		# keyboard path: focus board cell
-		if grid != null and grid.get_child_count() > 0:
-			var c0: Control = grid.get_child(0) as Control
-			c0.grab_focus()
-			await _tree.process_frame
-			_assert_true("k12_%s_kb" % tag, c0.has_focus() or true)
-		screen.queue_free()
-		host.queue_free()
-		await _tree.process_frame
-	BattleRuntime.clear_refill_kind_override_for_tests()
+		await _run_responsive_viewport(int(size.x), int(size.y))
 	print("[INFO] K12 responsive passed")
 
 
-func _count_vscroll(n: Node, count: int) -> int:
+func _rect_fully_within(inner: Rect2, outer: Rect2, tolerance: float) -> bool:
+	return (
+		inner.position.x >= outer.position.x - tolerance
+		and inner.position.y >= outer.position.y - tolerance
+		and inner.end.x <= outer.end.x + tolerance
+		and inner.end.y <= outer.end.y + tolerance
+	)
+
+
+func _collect_scrolls(n: Node, out: Array) -> void:
 	if n is ScrollContainer:
-		count += 1
+		out.append(n)
 	for c in n.get_children():
-		count = _count_vscroll(c, count)
-	return count
+		_collect_scrolls(c, out)
+
+
+func _send_ui_action(sv: SubViewport, action: String) -> void:
+	var press := InputEventAction.new()
+	press.action = action
+	press.pressed = true
+	sv.push_input(press)
+	var release := InputEventAction.new()
+	release.action = action
+	release.pressed = false
+	sv.push_input(release)
+
+
+func _run_responsive_viewport(w: int, h: int) -> void:
+	var tag: String = "%dx%d" % [w, h]
+	var vp := SubViewport.new()
+	vp.size = Vector2i(w, h)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_tree.root.add_child(vp)
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.size = Vector2(w, h)
+	vp.add_child(host)
+	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
+	var screen: Control = packed.instantiate() as Control
+	host.add_child(screen)
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.size = Vector2(w, h)
+	screen.call("configure_screen", &"battle")
+	for _i in 8:
+		await _tree.process_frame
+
+	var host_origin: Vector2 = host.get_global_rect().position
+	var grid: GridContainer = screen.call("get_board_grid") as GridContainer
+	var scroll: ScrollContainer = screen.call("get_body_scroll") as ScrollContainer
+	var back: Button = screen.call("get_back_button") as Button
+	var leave: Button = screen.call("get_leave_button") as Button
+	var pcards: Array = screen.call("get_party_cards_for_tests") as Array
+	var ecards: Array = screen.call("get_enemy_cards_for_tests") as Array
+	var log_box: VBoxContainer = screen.call("get_combat_log_box_for_tests") as VBoxContainer
+	_assert_true("%s_grid" % tag, grid != null)
+	_assert_true("%s_scroll" % tag, scroll != null)
+	_assert_true("%s_back" % tag, back != null)
+	_assert_true("%s_leave" % tag, leave != null)
+	_assert_true("%s_log" % tag, log_box != null)
+	_assert_eq("%s_cells_n" % tag, grid.get_child_count(), 30)
+	_assert_eq("%s_pc" % tag, pcards.size(), 3)
+	_assert_eq("%s_ec" % tag, ecards.size(), 3)
+
+	var scrolls: Array = []
+	_collect_scrolls(screen, scrolls)
+	_assert_eq("%s_vscroll_count" % tag, scrolls.size(), 1)
+
+	var range_h: float = 0.0
+	if scroll.get_h_scroll_bar() != null:
+		var hb: ScrollBar = scroll.get_h_scroll_bar()
+		range_h = maxf(0.0, float(hb.max_value) - float(hb.page))
+	_assert_true("%s_hscroll_range" % tag, range_h <= 0.5)
+
+	for i in 30:
+		var cell: Control = grid.get_child(i) as Control
+		_assert_true("%s_cw_%d" % [tag, i], cell != null)
+		_assert_true("%s_cwa_%d" % [tag, i], cell.size.x >= 48.0)
+		_assert_true("%s_cha_%d" % [tag, i], cell.size.y >= 48.0)
+
+	for card in pcards:
+		var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", card) as ProgressBar
+		_assert_true("%s_pbar" % tag, bar != null)
+		_assert_true("%s_pbar_h" % tag, bar.size.y >= 16.0)
+	for card in ecards:
+		var bar2: ProgressBar = screen.call("get_card_progress_bar_for_tests", card) as ProgressBar
+		_assert_true("%s_ebar" % tag, bar2 != null)
+		_assert_true("%s_ebar_h" % tag, bar2.size.y >= 16.0)
+
+	_assert_true("%s_back_h" % tag, back.size.y >= 48.0)
+	_assert_true("%s_leave_h" % tag, leave.size.y >= 48.0)
+	_assert_eq("%s_log_focus" % tag, log_box.focus_mode, Control.FOCUS_NONE)
+
+	# Combat log + combatant + board reachability via full containment in BodyScroll.
+	var row_n: int = int(screen.call("get_combat_log_row_count_for_tests"))
+	_assert_true("%s_log_rows" % tag, row_n >= 1)
+	var reach_targets: Array = []
+	if log_box.get_child_count() > 0:
+		reach_targets.append(log_box.get_child(0))
+		reach_targets.append(log_box.get_child(log_box.get_child_count() - 1))
+	reach_targets.append(pcards[0])
+	reach_targets.append(pcards[pcards.size() - 1])
+	reach_targets.append(ecards[0])
+	reach_targets.append(ecards[ecards.size() - 1])
+	reach_targets.append(grid.get_child(0))
+	reach_targets.append(grid.get_child(29))
+	reach_targets.append(leave)
+	for t in reach_targets:
+		var ctrl: Control = t as Control
+		_assert_true("%s_tgt" % tag, ctrl != null)
+		screen.call("ensure_control_visible_for_test", ctrl)
+		for _j in 3:
+			await _tree.process_frame
+		var scroll_vis: Rect2 = scroll.get_global_rect()
+		scroll_vis.position -= host_origin
+		# Leave/Back may sit outside body scroll; for scroll-body targets require full within.
+		if ctrl == leave or ctrl == back:
+			var vr := Rect2(Vector2.ZERO, Vector2(w, h))
+			var lr := Rect2(ctrl.get_global_rect().position - host_origin, ctrl.get_global_rect().size)
+			_assert_true("%s_leave_reach" % tag, _rect_fully_within(lr, vr, 2.0))
+		else:
+			var gr: Rect2 = ctrl.get_global_rect()
+			var local := Rect2(gr.position - host_origin, gr.size)
+			_assert_true("%s_reach" % tag, _rect_fully_within(local, scroll_vis, 2.0))
+
+	# Keyboard focus contract
+	var c0: Button = screen.call("get_cell_button", 0, 0) as Button
+	var c1: Button = screen.call("get_cell_button", 1, 0) as Button
+	_assert_true("%s_c0" % tag, c0 != null)
+	_assert_true("%s_c1" % tag, c1 != null)
+	c0.grab_focus()
+	await _tree.process_frame
+	_assert_true("%s_kb_focus0" % tag, vp.gui_get_focus_owner() == c0)
+	_send_ui_action(vp, "ui_right")
+	await _tree.process_frame
+	_assert_true("%s_kb_right" % tag, vp.gui_get_focus_owner() == c1)
+	c0.grab_focus()
+	await _tree.process_frame
+	_send_ui_action(vp, "ui_up")
+	await _tree.process_frame
+	_assert_true("%s_kb_up_back" % tag, vp.gui_get_focus_owner() == back)
+	var c_last: Button = screen.call("get_cell_button", 5, 4) as Button
+	_assert_true("%s_clast" % tag, c_last != null)
+	c_last.grab_focus()
+	await _tree.process_frame
+	_send_ui_action(vp, "ui_down")
+	await _tree.process_frame
+	_assert_true("%s_kb_down_leave" % tag, vp.gui_get_focus_owner() == leave)
+
+	vp.queue_free()
+	await _tree.process_frame
 
 
 # ─── K13 enter/leave ──────────────────────────────────────────────
