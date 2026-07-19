@@ -1,4 +1,4 @@
-## GROK-036 evidence suite: atomic failure, transactions, real turn, responsive, integrity.
+## GROK-037 closeout: forced turn, real transactions, SubViewport responsive, integrity.
 extends RefCounted
 
 var passed: int = 0
@@ -13,24 +13,23 @@ func setup(tree: SceneTree) -> void:
 
 
 func run_all() -> void:
-	_clear_catalog_overrides()
+	var fp0: Dictionary = _prod_fp()
+	_clear_overrides()
 	_reset_domain()
-	_run_assertion_integrity_scan()
-	_run_json_number_contract_tests()
-	_run_catalog_defensive_and_matrix()
-	_run_combatant_matrix()
-	_run_encounter_matrix()
-	_run_runtime_atomic_failure_matrix()
-	_run_snapshot_failure_matrix()
-	await _run_adventure_enter_transaction_tests()
-	await _run_leave_transaction_and_real_turn_tests()
-	await _run_screen_exact_and_responsive_tests()
+	_run_integrity_scan()
+	_run_catalog_and_combatant_closeout()
+	await _run_forced_accepted_turn()
+	_run_snapshot_matrix_closeout()
+	await _run_adventure_three_failures()
+	await _run_double_enter_leave()
+	await _run_max_content_cards_and_subviewport()
 	_cleanup_fixtures()
-	_clear_catalog_overrides()
+	_clear_overrides()
 	_reset_domain()
 	PlayerData.configure_test_storage_path("user://feibao_tests/suite_main")
 	PlayerData.reset_runtime_state_for_tests()
-	print("[INFO] battle encounter combatant evidence suite complete")
+	_assert_true("prod_fp_unchanged", _fp_eq(fp0, _prod_fp()))
+	print("[INFO] GROK-037 encounter closeout suite complete")
 
 
 func _nav() -> Node:
@@ -46,7 +45,7 @@ func _reset_domain() -> void:
 		BattleState.reset_runtime_state_for_tests()
 
 
-func _clear_catalog_overrides() -> void:
+func _clear_overrides() -> void:
 	BattleCharacterStatsCatalog.clear_default_path_override_for_tests()
 	EnemyCatalog.clear_default_path_override_for_tests()
 	StageEncounterCatalog.clear_default_path_override_for_tests()
@@ -59,21 +58,12 @@ func _cleanup_fixtures() -> void:
 	_fixture_paths.clear()
 
 
-func _seed_session(stage_id: StringName = &"dev_stage_beginner_01") -> void:
-	PlayerData.configure_test_storage_path("user://feibao_tests/enc_ev")
-	PlayerData.reset_runtime_state_for_tests()
-	PlayerData.initialize()
-	_reset_domain()
-	AdventureState.prepare_stage(stage_id)
-	_assert_true("seed_bs", bool(BattleState.begin_from_prepared_stage().get("ok", false)))
-
-
 func _write_fixture(name: String, text: String) -> String:
 	var dir_path := "user://feibao_tests/encounter_catalog_fixtures"
 	DirAccess.make_dir_recursive_absolute(dir_path)
 	var path := "%s/%s" % [dir_path, name]
 	var f := FileAccess.open(path, FileAccess.WRITE)
-	_assert_true("fx_write_%s" % name, f != null)
+	_assert_true("fx_%s" % name, f != null)
 	if f != null:
 		f.store_string(text)
 		f.close()
@@ -114,6 +104,62 @@ func _fp_eq(a: Dictionary, b: Dictionary) -> bool:
 	return true
 
 
+func _seed_party3_session(stage_id: StringName = &"dev_stage_mist_03") -> void:
+	PlayerData.configure_test_storage_path("user://feibao_tests/enc_g037")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	PlayerData.grant_character(&"partner_a")
+	PlayerData.grant_character(&"partner_b")
+	PlayerData.add_party_member(&"partner_a")
+	PlayerData.add_party_member(&"partner_b")
+	_assert_eq("seed_party3", PlayerData.get_active_party_character_ids().size(), 3)
+	_reset_domain()
+	AdventureState.prepare_stage(stage_id)
+	_assert_true("seed_bs", bool(BattleState.begin_from_prepared_stage().get("ok", false)))
+	_assert_eq("seed_party_bind", BattleState.get_party_character_ids().size(), 3)
+
+
+func _seed_solo(stage_id: StringName = &"dev_stage_beginner_01") -> void:
+	PlayerData.configure_test_storage_path("user://feibao_tests/enc_g037_solo")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	# Ensure canonical solo party (feibao_dev only).
+	while PlayerData.get_active_party_character_ids().size() > 1:
+		var ids: Array[StringName] = PlayerData.get_active_party_character_ids()
+		var tail: StringName = ids[ids.size() - 1]
+		PlayerData.remove_party_member(tail)
+	_assert_eq("seed_solo_party", PlayerData.get_active_party_character_ids().size(), 1)
+	_reset_domain()
+	AdventureState.prepare_stage(stage_id)
+	_assert_true("seed_solo_bs", bool(BattleState.begin_from_prepared_stage().get("ok", false)))
+	_assert_eq("seed_solo_bs_party", BattleState.get_party_character_ids().size(), 1)
+
+
+func _match_ready_board() -> Array[StringName]:
+	# Alternating base (no 3-run), then row0: E E T E L S — swap (2,0)-(3,0) → E E E.
+	var out: Array[StringName] = []
+	out.resize(30)
+	var kinds: Array[StringName] = [
+		BattleOrbKind.EMBER, BattleOrbKind.TIDE, BattleOrbKind.LEAF, BattleOrbKind.LIGHT, BattleOrbKind.SHADOW
+	]
+	for y in 5:
+		for x in 6:
+			out[BattleBoardModel.index_of(x, y)] = kinds[(x + y * 2) % kinds.size()]
+	out[0] = BattleOrbKind.EMBER
+	out[1] = BattleOrbKind.EMBER
+	out[2] = BattleOrbKind.TIDE
+	out[3] = BattleOrbKind.EMBER
+	out[4] = BattleOrbKind.LIGHT
+	out[5] = BattleOrbKind.SHADOW
+	# Isolate vertical under swap columns
+	for y in range(1, 5):
+		out[BattleBoardModel.index_of(0, y)] = BattleOrbKind.TIDE if y % 2 == 0 else BattleOrbKind.LEAF
+		out[BattleBoardModel.index_of(1, y)] = BattleOrbKind.LIGHT if y % 2 == 0 else BattleOrbKind.SHADOW
+		out[BattleBoardModel.index_of(2, y)] = BattleOrbKind.SHADOW if y % 2 == 0 else BattleOrbKind.LIGHT
+		out[BattleBoardModel.index_of(3, y)] = BattleOrbKind.LEAF if y % 2 == 0 else BattleOrbKind.TIDE
+	return out
+
+
 func _runtime_exact_1_1(snap: Dictionary) -> bool:
 	if bool(snap.get("active", false)) != BattleRuntime.has_active_runtime():
 		return false
@@ -152,31 +198,32 @@ func _runtime_exact_1_1(snap: Dictionary) -> bool:
 	if str(BattleRuntime.get_last_message()) != str(snap.get("last_message", "")):
 		return false
 	if not BattleResolutionEvent.events_equal(
-		snap.get("last_resolution_events", []) as Array,
-		BattleRuntime.get_last_resolution_events()
+		snap.get("last_resolution_events", []) as Array, BattleRuntime.get_last_resolution_events()
 	):
 		return false
-	var exp_enc: Dictionary = snap.get("encounter", {}) as Dictionary
-	if not snap.has("encounter"):
-		exp_enc = {"player_combatants": [], "enemy_combatants": [], "active_enemy_index": -1}
+	var exp_enc: Dictionary = {"player_combatants": [], "enemy_combatants": [], "active_enemy_index": -1}
+	if snap.has("encounter") and snap.get("encounter") is Dictionary:
+		exp_enc = snap.get("encounter") as Dictionary
 	var er: Dictionary = BattleEncounterModel.restore_snapshot(exp_enc)
 	var ar: Dictionary = BattleEncounterModel.restore_snapshot(BattleRuntime.get_encounter_snapshot())
 	if not bool(er.get("ok", false)) or not bool(ar.get("ok", false)):
 		return false
-	return BattleEncounterModel.equals(er.get("encounter") as BattleEncounterModel, ar.get("encounter") as BattleEncounterModel)
+	return BattleEncounterModel.equals(
+		er.get("encounter") as BattleEncounterModel, ar.get("encounter") as BattleEncounterModel
+	)
+
+
+func _combatants_exact(a: Array[BattleCombatantModel], b: Array[BattleCombatantModel]) -> bool:
+	if a.size() != b.size():
+		return false
+	for i in a.size():
+		if not BattleCombatantModel.equals(a[i], b[i]):
+			return false
+	return true
 
 
 func _connect_sigs() -> Dictionary:
-	var sigs := {
-		"rt": [0],
-		"bd": [0],
-		"ph": [0],
-		"en": [0],
-		"on_rt": null,
-		"on_bd": null,
-		"on_ph": null,
-		"on_en": null,
-	}
+	var sigs := {"rt": [0], "bd": [0], "ph": [0], "en": [0], "on_rt": null, "on_bd": null, "on_ph": null, "on_en": null}
 	var on_rt := func(_a: bool) -> void:
 		sigs["rt"][0] = int(sigs["rt"][0]) + 1
 	var on_bd := func() -> void:
@@ -197,10 +244,10 @@ func _connect_sigs() -> Dictionary:
 
 
 func _disconnect_sigs(sigs: Dictionary) -> void:
-	var on_rt: Callable = sigs.get("on_rt") as Callable
-	var on_bd: Callable = sigs.get("on_bd") as Callable
-	var on_ph: Callable = sigs.get("on_ph") as Callable
-	var on_en: Callable = sigs.get("on_en") as Callable
+	var on_rt: Callable = sigs["on_rt"] as Callable
+	var on_bd: Callable = sigs["on_bd"] as Callable
+	var on_ph: Callable = sigs["on_ph"] as Callable
+	var on_en: Callable = sigs["on_en"] as Callable
 	if BattleRuntime.runtime_changed.is_connected(on_rt):
 		BattleRuntime.runtime_changed.disconnect(on_rt)
 	if BattleRuntime.board_changed.is_connected(on_bd):
@@ -211,6 +258,10 @@ func _disconnect_sigs(sigs: Dictionary) -> void:
 		BattleRuntime.encounter_changed.disconnect(on_en)
 
 
+func _sig_base(sigs: Dictionary) -> Dictionary:
+	return {"rt": int(sigs["rt"][0]), "bd": int(sigs["bd"][0]), "ph": int(sigs["ph"][0]), "en": int(sigs["en"][0])}
+
+
 func _assert_sig_zero(tag: String, sigs: Dictionary, base: Dictionary) -> void:
 	_assert_eq("%s_sig_rt" % tag, int(sigs["rt"][0]), int(base["rt"]))
 	_assert_eq("%s_sig_bd" % tag, int(sigs["bd"][0]), int(base["bd"]))
@@ -218,532 +269,668 @@ func _assert_sig_zero(tag: String, sigs: Dictionary, base: Dictionary) -> void:
 	_assert_eq("%s_sig_en" % tag, int(sigs["en"][0]), int(base["en"]))
 
 
-func _run_assertion_integrity_scan() -> void:
-	var f := FileAccess.open("res://tests/battle_encounter_combatant_smoke_test.gd", FileAccess.READ)
-	_assert_true("ais_open", f != null)
-	var text: String = f.get_as_text() if f != null else ""
-	if f != null:
-		f.close()
-	_assert_true("ais_no_fixed_true", text.find("_assert_true(\"ccs_defensive_copy\", true)") < 0)
-	_assert_true("ais_no_assert_true_lit", text.find("_assert_true(\"x\", true)") < 0)
-	# Weak OR for expected UI content should not appear for enemy/affinity cases
-	_assert_true("ais_no_ui_enemy_or", text.find("ui_enemy_name") < 0 or text.find("find(\"幼芽\") >= 0\n\t\tor") < 0)
-	print("[INFO] assertion integrity scan passed")
+func _rect_fully_within(inner: Rect2, outer: Rect2, tolerance: float) -> bool:
+	return (
+		inner.position.x >= outer.position.x - tolerance
+		and inner.position.y >= outer.position.y - tolerance
+		and inner.end.x <= outer.end.x + tolerance
+		and inner.end.y <= outer.end.y + tolerance
+	)
 
 
-func _run_json_number_contract_tests() -> void:
-	# 10 and 10.0 accepted; 10.5 / true / "10" / null rejected
-	var ok10: Dictionary = BattleCharacterStatsCatalog.parse_json_text(
+func _run_integrity_scan() -> void:
+	var paths: Array[String] = [
+		"res://tests/battle_encounter_combatant_smoke_test.gd",
+		"res://tests/battle_board_turn_loop_smoke_test.gd",
+	]
+	# Needles built so this scan source does not embed forbidden assertion shapes.
+	var needle_if_acc: String = "if " + "accepted" + ":"
+	var needle_cmin: String = "custom_minimum_size" + ".y >= 16"
+	var needle_comb: String = "get_combined_minimum_size" + "()"
+	var needle_or_size: String = "size.x >= 48.0 " + "or"
+	var needle_or_size_y: String = "size.y >= 48.0 " + "or"
+	var needle_bar_or: String = "size.y >= 16.0 " + "or"
+	var needle_hp_or: String = "HP %d" + " / " + "%d"
+	var needle_fixed: String = "_assert_true(\"ccs_defensive_copy\", true)"
+	for path in paths:
+		var f := FileAccess.open(path, FileAccess.READ)
+		_assert_true("int_open_%s" % path.get_file(), f != null)
+		var text: String = f.get_as_text() if f != null else ""
+		if f != null:
+			f.close()
+		var tag: String = path.get_file().get_basename()
+		# Encounter suite must not use conditional accepted-turn evidence.
+		if path.ends_with("battle_encounter_combatant_smoke_test.gd"):
+			_assert_true("int_%s_no_if_accepted" % tag, text.find(needle_if_acc) < 0)
+			_assert_true("int_%s_no_standalone_pass" % tag, text.find("\n\t" + "pass" + "\n") < 0)
+			_assert_true("int_%s_no_fixed_true" % tag, text.find(needle_fixed) < 0)
+			_assert_true("int_%s_no_hp_format_or" % tag, text.find(needle_hp_or) < 0)
+			_assert_true("int_%s_no_custom_min_or" % tag, text.find(needle_cmin) < 0)
+			_assert_true("int_%s_no_combined_min" % tag, text.find(needle_comb) < 0)
+			_assert_true("int_%s_no_size_or" % tag, text.find(needle_or_size) < 0)
+			_assert_true("int_%s_no_size_y_or" % tag, text.find(needle_or_size_y) < 0)
+			_assert_true("int_%s_no_bar_or" % tag, text.find(needle_bar_or) < 0)
+			_assert_true("int_%s_has_forced_swap" % tag, text.find("try_swap_cells(Vector2i(2, 0), Vector2i(3, 0))") >= 0)
+			_assert_true("int_%s_has_subviewport" % tag, text.find("SubViewport") >= 0)
+			_assert_true("int_%s_has_rect_helper" % tag, text.find("_rect_fully_within") >= 0)
+	print("[INFO] integrity scan passed")
+
+
+func _assert_parse_fail(tag: String, ok_flag: Variant) -> void:
+	_assert_true(tag, bool(ok_flag) == false)
+
+
+func _run_catalog_and_combatant_closeout() -> void:
+	var base_stats := (
 		'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":1,"defense":1}]}'
 	)
-	_assert_true("jn_10", bool(ok10.get("ok", false)))
-	var ok100: Dictionary = BattleCharacterStatsCatalog.parse_json_text(
+	_assert_parse_fail(
+		"cat_dup_char",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":1,"defense":1},{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":1,"defense":1}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"cat_miss_field",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":1}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"cat_bad_aff",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"fire","max_hp":10,"attack":1,"defense":1}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"cat_hp0",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":0,"attack":1,"defense":1}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"cat_atk_neg",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":-1,"defense":1}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"cat_def_neg",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10,"attack":1,"defense":-1}]}'
+		).get("ok", true)
+	)
+	for field in ["max_hp", "attack", "defense"]:
+		for bad_val in ['true', '"10"', "null"]:
+			var j: String = base_stats.replace('"max_hp":10', '"%s":%s' % [field, bad_val] if field == "max_hp" else '"max_hp":10')
+			if field == "attack":
+				j = base_stats.replace('"attack":1', '"attack":%s' % bad_val)
+			elif field == "defense":
+				j = base_stats.replace('"defense":1', '"defense":%s' % bad_val)
+			_assert_parse_fail("cat_%s_%s" % [field, bad_val.replace('"', "")], BattleCharacterStatsCatalog.parse_json_text(j).get("ok", true))
+	var ok_float: Dictionary = BattleCharacterStatsCatalog.parse_json_text(
 		'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10.0,"attack":1,"defense":1}]}'
 	)
-	_assert_true("jn_10_0", bool(ok100.get("ok", false)))
-	if bool(ok100.get("ok", false)):
-		var st: Dictionary = ((ok100.get("stats", []) as Array)[0] as Dictionary)
-		_assert_eq("jn_norm_int", typeof(st.get("max_hp")), TYPE_INT)
-		_assert_eq("jn_norm_val", int(st.get("max_hp")), 10)
-	_assert_true(
-		"jn_10_5",
-		bool(
-			BattleCharacterStatsCatalog.parse_json_text(
-				'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10.5,"attack":1,"defense":1}]}'
-			).get("ok", true)
-		)
-		== false
+	_assert_true("cat_whole_float_ok", bool(ok_float.get("ok", false)))
+	_assert_parse_fail(
+		"cat_frac",
+		BattleCharacterStatsCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":10.5,"attack":1,"defense":1}]}'
+		).get("ok", true)
 	)
-	_assert_true(
-		"jn_bool",
-		bool(
-			BattleCharacterStatsCatalog.parse_json_text(
-				'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":true,"attack":1,"defense":1}]}'
-			).get("ok", true)
-		)
-		== false
+
+	_assert_parse_fail(
+		"en_dup",
+		EnemyCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","enemies":[{"enemy_id":"training_sprout","display_name":"A","affinity":"leaf","max_hp":1,"attack":0,"defense":0,"visual_symbol":"x"},{"enemy_id":"training_sprout","display_name":"B","affinity":"leaf","max_hp":1,"attack":0,"defense":0,"visual_symbol":"y"}]}'
+		).get("ok", true)
 	)
-	_assert_true(
-		"jn_str",
-		bool(
-			BattleCharacterStatsCatalog.parse_json_text(
-				'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":"10","attack":1,"defense":1}]}'
-			).get("ok", true)
+	var en_ok: Dictionary = EnemyCatalog.load_default()
+	_assert_true("en_load_ok", bool(en_ok.get("ok", false)))
+	var en_list: Array = en_ok.get("enemies", []) as Array
+	_assert_true("en_load_nonempty", en_list.size() >= 1)
+	# Caller mutation must not poison subsequent loads.
+	if en_list.size() > 0 and en_list[0] is Dictionary:
+		(en_list[0] as Dictionary)["display_name"] = "MUTATED"
+	var en_ok2: Dictionary = EnemyCatalog.load_default()
+	_assert_true("en_defensive_reload", bool(en_ok2.get("ok", false)))
+	if (en_ok2.get("enemies", []) as Array).size() > 0:
+		_assert_true(
+			"en_defensive_copy",
+			str(((en_ok2.get("enemies", []) as Array)[0] as Dictionary).get("display_name", "")) != "MUTATED"
 		)
-		== false
+
+	_assert_parse_fail(
+		"se_enemy0",
+		StageEncounterCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","encounters":[{"stage_id":"dev_stage_beginner_01","enemy_ids":[]}]}'
+		).get("ok", true)
 	)
-	_assert_true(
-		"jn_null",
-		bool(
-			BattleCharacterStatsCatalog.parse_json_text(
-				'{"schema_version":1,"catalog_kind":"development_seed","stats":[{"character_id":"feibao_dev","affinity":"ember","max_hp":null,"attack":1,"defense":1}]}'
-			).get("ok", true)
-		)
-		== false
+	_assert_parse_fail(
+		"se_enemy4",
+		StageEncounterCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","encounters":[{"stage_id":"dev_stage_beginner_01","enemy_ids":["training_sprout","training_droplet","training_emberling","training_sprout"]}]}'
+		).get("ok", true)
 	)
-	# Snapshot still TYPE_INT only
+	_assert_parse_fail(
+		"se_dup_stage",
+		StageEncounterCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","encounters":[{"stage_id":"dev_stage_beginner_01","enemy_ids":["training_sprout"]},{"stage_id":"dev_stage_beginner_01","enemy_ids":["training_droplet"]}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"se_unknown_enemy",
+		StageEncounterCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","encounters":[{"stage_id":"dev_stage_beginner_01","enemy_ids":["no_such_enemy_xyz"]}]}'
+		).get("ok", true)
+	)
+	_assert_parse_fail(
+		"se_dup_enemy",
+		StageEncounterCatalog.parse_json_text(
+			'{"schema_version":1,"catalog_kind":"development_seed","encounters":[{"stage_id":"dev_stage_beginner_01","enemy_ids":["training_sprout","training_sprout"]}]}'
+		).get("ok", true)
+	)
+
 	var p: Dictionary = BattleCombatantModel.create_player(&"feibao_dev", "飛寶（開發樣本）", &"ember", 0, 120, 14, 8)
-	var snap: Dictionary = (p.get("combatant") as BattleCombatantModel).capture_snapshot()
-	snap["current_hp"] = 10.0
-	_assert_true("jn_snap_float_reject", bool(BattleCombatantModel.validate_snapshot(snap).get("ok", true)) == false)
-	print("[INFO] JSON whole-number contract tests passed")
-
-
-func _run_catalog_defensive_and_matrix() -> void:
-	var loaded: Dictionary = BattleCharacterStatsCatalog.load_default()
-	_assert_true("ccs_ok", bool(loaded.get("ok", false)))
-	var stats_a: Array = (loaded.get("stats", []) as Array).duplicate(true)
-	_assert_true("ccs_nonempty", stats_a.size() > 0)
-	var first: Dictionary = (stats_a[0] as Dictionary).duplicate(true)
-	var orig_hp: int = int(first.get("max_hp", -1))
-	first["max_hp"] = 1
-	stats_a[0] = first
-	# Mutate returned array element if shared — then reload
-	var loaded2: Dictionary = BattleCharacterStatsCatalog.load_default()
-	var stats_b: Array = loaded2.get("stats", []) as Array
-	var b0: Dictionary = stats_b[0] as Dictionary
-	_assert_eq("ccs_defensive_hp", int(b0.get("max_hp", -2)), orig_hp)
-	var find_a: Dictionary = BattleCharacterStatsCatalog.find_stats(&"feibao_dev")
-	var sa: Dictionary = (find_a.get("stats", {}) as Dictionary).duplicate(true)
-	var orig_atk: int = int(sa.get("attack", -1))
-	sa["attack"] = 0
-	var find_b: Dictionary = BattleCharacterStatsCatalog.find_stats(&"feibao_dev")
-	_assert_eq("ccs_find_defensive", int((find_b.get("stats", {}) as Dictionary).get("attack", -2)), orig_atk)
-
-	# Coverage exact
-	var chars: Dictionary = CharacterCatalog.load_default()
-	for c in chars.get("characters", []):
-		if c is CharacterDefinition:
-			var id: StringName = (c as CharacterDefinition).get_id()
-			_assert_true("ccs_cover_%s" % str(id), bool(BattleCharacterStatsCatalog.find_stats(id).get("ok", false)))
-
-	var en: Dictionary = EnemyCatalog.load_default()
-	_assert_true("en_ok", bool(en.get("ok", false)))
-	var efind: Dictionary = EnemyCatalog.find_enemy(&"training_sprout")
-	var ed: Dictionary = (efind.get("enemy", {}) as Dictionary).duplicate(true)
-	var oname: String = str(ed.get("display_name", ""))
-	ed["display_name"] = "MUT"
-	var efind2: Dictionary = EnemyCatalog.find_enemy(&"training_sprout")
-	_assert_eq("en_defensive", str((efind2.get("enemy", {}) as Dictionary).get("display_name", "")), oname)
-
-	var se: Dictionary = StageEncounterCatalog.find_encounter(&"dev_stage_beginner_02")
-	_assert_true("se_b02", bool(se.get("ok", false)))
-	var enc: Dictionary = se.get("encounter", {}) as Dictionary
-	var eids: Array = enc.get("enemy_ids", []) as Array
-	_assert_eq("se_b02_n", eids.size(), 2)
-	_assert_eq("se_b02_0", str(eids[0]), "training_sprout")
-	_assert_eq("se_b02_1", str(eids[1]), "training_droplet")
-	eids.clear()
-	var se2: Dictionary = StageEncounterCatalog.find_encounter(&"dev_stage_beginner_02")
-	_assert_eq("se_defensive", (se2.get("encounter", {}) as Dictionary).get("enemy_ids", []).size() if se2.get("encounter") is Dictionary else 0, 2)
-	print("[INFO] catalog defensive/matrix tests passed")
-
-
-func _run_combatant_matrix() -> void:
-	var p: Dictionary = BattleCombatantModel.create_player(&"feibao_dev", "飛寶（開發樣本）", &"ember", 0, 120, 14, 8)
-	_assert_true("cm_player", bool(p.get("ok", false)))
-	var e: Dictionary = BattleCombatantModel.create_enemy(&"training_sprout", "訓練幼芽", &"leaf", 0, 40, 8, 3)
-	_assert_true("cm_enemy", bool(e.get("ok", false)))
+	_assert_true("cm_p", bool(p.get("ok", false)))
 	var pc: BattleCombatantModel = p.get("combatant") as BattleCombatantModel
+	var dup: BattleCombatantModel = pc.duplicate_model()
+	dup.set_current_hp_for_tests(1)
+	_assert_eq("cm_dup_def", pc.get_current_hp(), 120)
 	var snap: Dictionary = pc.capture_snapshot()
-	snap["current_hp"] = 0
-	var zero: Dictionary = BattleCombatantModel.restore_snapshot(snap)
-	_assert_true("cm_hp0", bool(zero.get("ok", false)))
-	_assert_true("cm_dead", (zero.get("combatant") as BattleCombatantModel).is_alive() == false)
+	var r: Dictionary = BattleCombatantModel.restore_snapshot(snap)
+	_assert_true("cm_round", bool(r.get("ok", false)))
+	var bad: Dictionary = snap.duplicate(true)
+	bad["attack"] = 999
+	_assert_parse_fail("cm_atk_mis", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["defense"] = 999
+	_assert_parse_fail("cm_def_mis", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["display_name"] = "X"
+	_assert_parse_fail("cm_name_mis", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["affinity"] = &"ember_wrong"
+	_assert_parse_fail("cm_aff_mis", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["max_hp"] = 999
+	_assert_parse_fail("cm_max_mis", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["current_hp"] = int(snap.get("max_hp", 1)) + 1
+	_assert_parse_fail("cm_hp_over", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["extra"] = 1
+	_assert_parse_fail("cm_extra", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad.erase("max_hp")
+	_assert_parse_fail("cm_miss", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
 	for field in ["max_hp", "attack", "defense", "current_hp", "slot_index"]:
-		var bad: Dictionary = pc.capture_snapshot()
-		bad[field] = "1"
-		_assert_true("cm_str_%s" % field, bool(BattleCombatantModel.validate_snapshot(bad).get("ok", true)) == false)
-		bad = pc.capture_snapshot()
-		bad[field] = true
-		_assert_true("cm_bool_%s" % field, bool(BattleCombatantModel.validate_snapshot(bad).get("ok", true)) == false)
-	var bad2: Dictionary = pc.capture_snapshot()
-	bad2["current_hp"] = -1
-	_assert_true("cm_hp_neg", bool(BattleCombatantModel.validate_snapshot(bad2).get("ok", true)) == false)
-	bad2 = pc.capture_snapshot()
-	bad2["current_hp"] = 9999
-	_assert_true("cm_hp_over", bool(BattleCombatantModel.validate_snapshot(bad2).get("ok", true)) == false)
-	bad2 = pc.capture_snapshot()
-	bad2["max_hp"] = 999
-	_assert_true("cm_immut_hp", bool(BattleCombatantModel.validate_snapshot(bad2).get("ok", true)) == false)
-	bad2 = pc.capture_snapshot()
-	bad2["source_id"] = &"nope"
-	_assert_true("cm_unk", bool(BattleCombatantModel.validate_snapshot(bad2).get("ok", true)) == false)
-	bad2 = pc.capture_snapshot()
-	bad2["affinity"] = &"fire"
-	_assert_true("cm_aff", bool(BattleCombatantModel.validate_snapshot(bad2).get("ok", true)) == false)
-	print("[INFO] combatant matrix passed")
+		for val in [1.5, "1", true, null]:
+			bad = snap.duplicate(true)
+			bad[field] = val
+			_assert_parse_fail("cm_type_%s_%s" % [field, str(val)], BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["display_name"] = RefCounted.new()
+	_assert_parse_fail("cm_obj", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	bad = snap.duplicate(true)
+	bad["display_name"] = Callable()
+	_assert_parse_fail("cm_callable", BattleCombatantModel.validate_snapshot(bad).get("ok", true))
+	var e: Dictionary = BattleCombatantModel.create_enemy(&"training_sprout", "訓練幼芽", &"leaf", 0, 40, 8, 3)
+	_assert_true("cm_e", bool(e.get("ok", false)))
+	var es: Dictionary = (e.get("combatant") as BattleCombatantModel).capture_snapshot()
+	_assert_true("cm_e_round", bool(BattleCombatantModel.restore_snapshot(es).get("ok", false)))
+	print("[INFO] catalog/combatant closeout passed")
 
 
-func _run_encounter_matrix() -> void:
-	var party: Array[StringName] = [&"feibao_dev", &"partner_a"]
-	var built: Dictionary = BattleEncounterModel.build_from_session(&"dev_stage_beginner_02", party)
-	_assert_true("em_ok", bool(built.get("ok", false)))
-	var enc: BattleEncounterModel = built.get("encounter") as BattleEncounterModel
-	_assert_eq("em_p0", str(enc.get_player_combatants()[0].get_source_id()), "feibao_dev")
-	_assert_eq("em_p1", str(enc.get_player_combatants()[1].get_source_id()), "partner_a")
-	_assert_eq("em_e0", str(enc.get_enemy_combatants()[0].get_source_id()), "training_sprout")
-	_assert_eq("em_e1", str(enc.get_enemy_combatants()[1].get_source_id()), "training_droplet")
-	_assert_eq("em_aei", enc.get_active_enemy_index(), 0)
-	_assert_eq("em_slot0", enc.get_player_combatants()[0].get_slot_index(), 0)
-	_assert_eq("em_slot1", enc.get_player_combatants()[1].get_slot_index(), 1)
-	var g: Array[BattleCombatantModel] = enc.get_player_combatants()
-	g.clear()
-	_assert_eq("em_def_get", enc.get_player_combatants().size(), 2)
-	var snap: Dictionary = enc.capture_snapshot()
-	var rt: Dictionary = BattleEncounterModel.restore_snapshot(snap)
-	_assert_true("em_round", BattleEncounterModel.equals(enc, rt.get("encounter") as BattleEncounterModel))
-	print("[INFO] encounter matrix passed")
+func _run_forced_accepted_turn() -> void:
+	_seed_solo(&"dev_stage_beginner_01")
+	_assert_true("ft_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+	var board: Array[StringName] = _match_ready_board()
+	_assert_true("ft_no_init_match", BattleBoardEngine.find_matches(board).is_empty())
+	_assert_true("ft_adj", BattleBoardEngine.are_adjacent(2, 0, 3, 0))
+	# Prove swap creates match without mutating runtime board yet
+	var probe: Array[StringName] = board.duplicate()
+	var tmp: StringName = probe[2]
+	probe[2] = probe[3]
+	probe[3] = tmp
+	_assert_true("ft_probe_match", BattleBoardEngine.find_matches(probe).size() >= 3)
 
-
-func _assert_begin_failure_preserves(tag: String) -> void:
-	_seed_session(&"dev_stage_beginner_01")
-	# Keep session active, runtime inactive
-	var before_rt: Dictionary = BattleRuntime.capture_runtime_snapshot()
-	var before_st: Dictionary = BattleState.capture_session_snapshot()
-	var prep_stage: StringName = AdventureState.get_selected_stage_id()
-	var rev: int = PlayerData.get_profile().get_revision()
-	var fp0: Dictionary = _prod_fp()
+	_assert_true("ft_set", BattleRuntime.set_board_cells_for_tests(board))
+	var players0: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
+	var enemies0: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
+	var aei0: int = BattleRuntime.get_active_enemy_index()
+	var turn0: int = BattleRuntime.get_turn_count()
 	var sigs: Dictionary = _connect_sigs()
-	var base_sig := {
-		"rt": int(sigs["rt"][0]),
-		"bd": int(sigs["bd"][0]),
-		"ph": int(sigs["ph"][0]),
-		"en": int(sigs["en"][0]),
-	}
-	var res: Dictionary = BattleRuntime.begin_from_battle_session()
-	_assert_true("%s_ok_false" % tag, bool(res.get("ok", true)) == false)
-	_assert_true("%s_rt_exact" % tag, _runtime_exact_1_1(before_rt))
-	_assert_eq("%s_stage" % tag, str(BattleState.get_stage_id()), str(before_st.get("stage_id", &"")))
-	_assert_eq("%s_prep" % tag, str(AdventureState.get_selected_stage_id()), str(prep_stage))
-	_assert_eq("%s_rev" % tag, PlayerData.get_profile().get_revision(), rev)
-	_assert_true("%s_fp" % tag, _fp_eq(fp0, _prod_fp()))
-	_assert_sig_zero(tag, sigs, base_sig)
+	var base: Dictionary = _sig_base(sigs)
+
+	var res: Dictionary = BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0))
+	_assert_true("ft_ok", bool(res.get("ok", false)))
+	_assert_true("ft_accepted", bool(res.get("accepted", false)))
+	_assert_eq("ft_turn", BattleRuntime.get_turn_count(), turn0 + 1)
+	_assert_true("ft_cleared", int(res.get("cleared_cell_count", 0)) >= 3)
+	_assert_true("ft_cascade", int(res.get("cascade_count", 0)) >= 1)
+	_assert_true("ft_players_exact", _combatants_exact(players0, BattleRuntime.get_player_combatants()))
+	_assert_true("ft_enemies_exact", _combatants_exact(enemies0, BattleRuntime.get_enemy_combatants()))
+	_assert_eq("ft_aei", BattleRuntime.get_active_enemy_index(), aei0)
+	_assert_eq("ft_en_sig", int(sigs["en"][0]), int(base["en"]))
+	var events: Array = BattleRuntime.get_last_resolution_events()
+	for e in events:
+		if e is Dictionary:
+			var t: String = str((e as Dictionary).get("type", ""))
+			_assert_true("ft_no_dmg_%s" % t, t != "damage" and t != "attack" and t != "victory" and t != "defeat")
+
+	var after_players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
+	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
+	var screen: Control = packed.instantiate() as Control
+	_tree.root.add_child(screen)
+	screen.call("configure_screen", &"battle")
+	for _i in 3:
+		await _tree.process_frame
+	var cards: Array = screen.call("get_party_cards_for_tests") as Array
+	_assert_eq("ft_ui_cards", cards.size(), 1)
+	var hp_text: String = str(screen.call("get_card_hp_label_for_tests", cards[0]))
+	_assert_eq(
+		"ft_ui_hp",
+		hp_text,
+		"HP %d/%d" % [after_players[0].get_current_hp(), after_players[0].get_max_hp()]
+	)
+	var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", cards[0]) as ProgressBar
+	_assert_true("ft_ui_bar", bar != null)
+	_assert_eq("ft_ui_bar_val", int(bar.value), after_players[0].get_current_hp())
+	# HP unchanged vs pre-turn combatants
+	_assert_eq("ft_ui_hp_unchanged", after_players[0].get_current_hp(), players0[0].get_current_hp())
+	screen.queue_free()
+	await _tree.process_frame
 	_disconnect_sigs(sigs)
-	_clear_catalog_overrides()
-
-
-func _run_runtime_atomic_failure_matrix() -> void:
-	# H1 missing character stats for party member
-	var stats_loaded: Dictionary = BattleCharacterStatsCatalog.load_default()
-	var stats_arr: Array = []
-	for item in stats_loaded.get("stats", []) as Array:
-		var d: Dictionary = (item as Dictionary).duplicate(true)
-		if str(d.get("character_id", "")) == "feibao_dev":
-			continue
-		# JSON stores string affinity/id — rebuild as JSON-friendly
-		stats_arr.append({
-			"character_id": str(d.get("character_id")),
-			"affinity": str(d.get("affinity")),
-			"max_hp": int(d.get("max_hp")),
-			"attack": int(d.get("attack")),
-			"defense": int(d.get("defense")),
-		})
-	var stats_json := JSON.stringify({"schema_version": 1, "catalog_kind": "development_seed", "stats": stats_arr})
-	var spath := _write_fixture("stats_no_feibao.json", stats_json)
-	BattleCharacterStatsCatalog.set_default_path_override_for_tests(spath)
-	_assert_begin_failure_preserves("h1_missing_stats")
-
-	# H2 missing stage encounter (incomplete catalog fails load)
-	var se_json := JSON.stringify({
-		"schema_version": 1,
-		"catalog_kind": "development_seed",
-		"encounters": [{"stage_id": "dev_stage_mist_01", "enemy_ids": ["training_sprout"]}],
-	})
-	var sepath := _write_fixture("se_incomplete.json", se_json)
-	StageEncounterCatalog.set_default_path_override_for_tests(sepath)
-	_assert_begin_failure_preserves("h2_missing_se")
-
-	# H3 missing enemy (stage encounter refs removed enemy)
-	var enemies_only_two := JSON.stringify({
-		"schema_version": 1,
-		"catalog_kind": "development_seed",
-		"enemies": [
-			{"enemy_id": "training_droplet", "display_name": "訓練水滴", "affinity": "tide", "max_hp": 48, "attack": 9, "defense": 4, "visual_symbol": "○"},
-			{"enemy_id": "training_emberling", "display_name": "訓練炎雛", "affinity": "ember", "max_hp": 36, "attack": 11, "defense": 2, "visual_symbol": "△"},
-		],
-	})
-	var epath := _write_fixture("en_no_sprout.json", enemies_only_two)
-	EnemyCatalog.set_default_path_override_for_tests(epath)
-	# Stage encounters still reference sprout on beginner_01 — load may fail when building encounter
-	_assert_begin_failure_preserves("h3_missing_enemy")
-
-	# H4 invalid enemy catalog (fractional hp)
-	var bad_en := JSON.stringify({
-		"schema_version": 1,
-		"catalog_kind": "development_seed",
-		"enemies": [
-			{"enemy_id": "training_sprout", "display_name": "訓練幼芽", "affinity": "leaf", "max_hp": 40.5, "attack": 8, "defense": 3, "visual_symbol": "◇"},
-		],
-	})
-	var bepath := _write_fixture("en_frac.json", bad_en)
-	EnemyCatalog.set_default_path_override_for_tests(bepath)
-	_assert_begin_failure_preserves("h4_invalid_enemy")
-
-	# H5 success + idempotent
-	_clear_catalog_overrides()
-	_seed_session(&"dev_stage_beginner_02")
-	var sigs: Dictionary = _connect_sigs()
-	var b0 := {
-		"rt": int(sigs["rt"][0]),
-		"bd": int(sigs["bd"][0]),
-		"ph": int(sigs["ph"][0]),
-		"en": int(sigs["en"][0]),
-	}
-	var ok: Dictionary = BattleRuntime.begin_from_battle_session()
-	_assert_true("h5_ok", bool(ok.get("ok", false)))
-	_assert_eq("h5_cells", BattleRuntime.get_board_cells().size(), 30)
-	_assert_eq("h5_players", BattleRuntime.get_player_combatants().size(), 1)
-	_assert_eq("h5_enemies", BattleRuntime.get_enemy_combatants().size(), 2)
-	_assert_eq("h5_e0", str(BattleRuntime.get_enemy_combatants()[0].get_source_id()), "training_sprout")
-	_assert_eq("h5_e1", str(BattleRuntime.get_enemy_combatants()[1].get_source_id()), "training_droplet")
-	_assert_eq("h5_aei", BattleRuntime.get_active_enemy_index(), 0)
-	_assert_eq("h5_hp", BattleRuntime.get_player_combatants()[0].get_current_hp(), BattleRuntime.get_player_combatants()[0].get_max_hp())
-	_assert_eq("h5_sig_rt", int(sigs["rt"][0]), int(b0["rt"]) + 1)
-	_assert_eq("h5_sig_bd", int(sigs["bd"][0]), int(b0["bd"]) + 1)
-	_assert_eq("h5_sig_en", int(sigs["en"][0]), int(b0["en"]) + 1)
-	var snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
-	var again: Dictionary = BattleRuntime.begin_from_battle_session()
-	_assert_true("h5_idemp", bool(again.get("ok", false)) and bool(again.get("changed", true)) == false)
-	_assert_true("h5_idemp_exact", _runtime_exact_1_1(snap))
-	_assert_eq("h5_idemp_rt", int(sigs["rt"][0]), int(b0["rt"]) + 1)
-	_assert_eq("h5_idemp_en", int(sigs["en"][0]), int(b0["en"]) + 1)
-	_disconnect_sigs(sigs)
-	print("[INFO] runtime atomic failure matrix passed")
+	print("[INFO] forced accepted turn passed")
 
 
 func _assert_restore_fail(tag: String, before: Dictionary, bad: Dictionary, sigs: Dictionary, base: Dictionary) -> void:
 	var res: Dictionary = BattleRuntime.restore_runtime_snapshot(bad)
-	_assert_true("%s_ok_false" % tag, bool(res.get("ok", true)) == false)
+	_assert_true("%s_okf" % tag, bool(res.get("ok", true)) == false)
 	_assert_true("%s_exact" % tag, _runtime_exact_1_1(before))
 	_assert_sig_zero(tag, sigs, base)
 
 
-func _run_snapshot_failure_matrix() -> void:
-	_clear_catalog_overrides()
-	_seed_session(&"dev_stage_beginner_02")
-	_assert_true("sf_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+func _run_snapshot_matrix_closeout() -> void:
+	_seed_solo(&"dev_stage_beginner_02")
+	_assert_true("sm_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
 	var before: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	var sigs: Dictionary = _connect_sigs()
-	var base := {
-		"rt": int(sigs["rt"][0]),
-		"bd": int(sigs["bd"][0]),
-		"ph": int(sigs["ph"][0]),
-		"en": int(sigs["en"][0]),
-	}
+	var base: Dictionary = _sig_base(sigs)
 
-	var bad: Dictionary = before.duplicate(true)
-	bad.erase("encounter")
-	_assert_restore_fail("sf_missing", before, bad, sigs, base)
+	var bad: Dictionary
+	var enc: Dictionary
+	var players: Array
+	var enemies: Array
+	var p0: Dictionary
+	var e0: Dictionary
 
+	# Container type failures
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	enc["player_combatants"] = "x"
 	bad = before.duplicate(true)
-	bad["encounter"] = "x"
-	_assert_restore_fail("sf_nondict", before, bad, sigs, base)
-
-	bad = before.duplicate(true)
-	var enc: Dictionary = (before.get("encounter") as Dictionary).duplicate(true)
-	enc["extra"] = 1
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_extra", before, bad, sigs, base)
+	_assert_restore_fail("sm_p_nonarr", before, bad, sigs, base)
 
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
-	enc["active_enemy_index"] = 1.0
+	enc["enemy_combatants"] = 1
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_aei_float", before, bad, sigs, base)
+	_assert_restore_fail("sm_e_nonarr", before, bad, sigs, base)
+
+	for v in ["x", true, null]:
+		enc = (before.get("encounter") as Dictionary).duplicate(true)
+		enc["active_enemy_index"] = v
+		bad = before.duplicate(true)
+		bad["encounter"] = enc
+		_assert_restore_fail("sm_aei_%s" % str(v), before, bad, sigs, base)
 
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
 	enc["active_enemy_index"] = -1
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_aei_neg", before, bad, sigs, base)
+	_assert_restore_fail("sm_aei_neg1_active", before, bad, sigs, base)
 
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
-	enc["active_enemy_index"] = 99
+	enc["active_enemy_index"] = 2
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_aei_oob", before, bad, sigs, base)
+	_assert_restore_fail("sm_aei_eqcount", before, bad, sigs, base)
+
+	# Counts
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	players = (enc.get("player_combatants") as Array).duplicate(true)
+	p0 = (players[0] as Dictionary).duplicate(true)
+	var p_extra: Array = [p0]
+	for si in range(1, 4):
+		var px: Dictionary = p0.duplicate(true)
+		px["slot_index"] = si
+		px["source_id"] = &"partner_a" if si == 1 else (&"partner_b" if si == 2 else &"feibao_dev")
+		p_extra.append(px)
+	enc["player_combatants"] = p_extra
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_pcount4", before, bad, sigs, base)
 
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
-	enc["player_combatants"] = []
+	enc["enemy_combatants"] = []
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_p0", before, bad, sigs, base)
+	_assert_restore_fail("sm_e0", before, bad, sigs, base)
 
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
-	var players: Array = (enc.get("player_combatants") as Array).duplicate(true)
-	var p0: Dictionary = (players[0] as Dictionary).duplicate(true)
-	p0["current_hp"] = -1
-	players[0] = p0
-	enc["player_combatants"] = players
+	enemies = (enc.get("enemy_combatants") as Array).duplicate(true)
+	e0 = (enemies[0] as Dictionary).duplicate(true)
+	var e_extra: Array = []
+	for si in 4:
+		var ex: Dictionary = e0.duplicate(true)
+		ex["slot_index"] = si
+		e_extra.append(ex)
+	enc["enemy_combatants"] = e_extra
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_hp_neg", before, bad, sigs, base)
+	_assert_restore_fail("sm_ecount4", before, bad, sigs, base)
 
-	p0 = ((before.get("encounter") as Dictionary).get("player_combatants") as Array)[0] as Dictionary
-	p0 = p0.duplicate(true)
-	p0["max_hp"] = 999
-	players = [(p0)]
+	# Identity / order
 	enc = (before.get("encounter") as Dictionary).duplicate(true)
-	enc["player_combatants"] = players
+	players = (enc.get("player_combatants") as Array).duplicate(true)
+	p0 = (players[0] as Dictionary).duplicate(true)
+	var p1: Dictionary = p0.duplicate(true)
+	p1["slot_index"] = 1
+	enc["player_combatants"] = [p0, p1]
 	bad = before.duplicate(true)
 	bad["encounter"] = enc
-	_assert_restore_fail("sf_immut", before, bad, sigs, base)
+	_assert_restore_fail("sm_dup_player", before, bad, sigs, base)
 
-	# Valid changed restore: current_hp = max-1
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	enemies = (enc.get("enemy_combatants") as Array).duplicate(true)
+	e0 = (enemies[0] as Dictionary).duplicate(true)
+	var e1: Dictionary = e0.duplicate(true)
+	e1["slot_index"] = 1
+	enc["enemy_combatants"] = [e0, e1]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_dup_enemy", before, bad, sigs, base)
+
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	players = (enc.get("player_combatants") as Array).duplicate(true)
+	p0 = (players[0] as Dictionary).duplicate(true)
+	p0["source_id"] = &"nope"
+	enc["player_combatants"] = [p0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_unk_player", before, bad, sigs, base)
+
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	enemies = (enc.get("enemy_combatants") as Array).duplicate(true)
+	e0 = (enemies[0] as Dictionary).duplicate(true)
+	e0["source_id"] = &"nope_enemy"
+	enc["enemy_combatants"] = [e0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_unk_enemy", before, bad, sigs, base)
+
+	# Slots / kind
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	players = (enc.get("player_combatants") as Array).duplicate(true)
+	p0 = (players[0] as Dictionary).duplicate(true)
+	p0["slot_index"] = 2
+	enc["player_combatants"] = [p0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_p_slot_noncontig", before, bad, sigs, base)
+
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	enemies = (enc.get("enemy_combatants") as Array).duplicate(true)
+	e0 = (enemies[0] as Dictionary).duplicate(true)
+	e0["slot_index"] = 2
+	enc["enemy_combatants"] = [e0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_e_slot_noncontig", before, bad, sigs, base)
+
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	players = (enc.get("player_combatants") as Array).duplicate(true)
+	p0 = (players[0] as Dictionary).duplicate(true)
+	p0["combatant_kind"] = &"enemy"
+	enc["player_combatants"] = [p0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_p_kind_enemy", before, bad, sigs, base)
+
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	enemies = (enc.get("enemy_combatants") as Array).duplicate(true)
+	e0 = (enemies[0] as Dictionary).duplicate(true)
+	e0["combatant_kind"] = &"player"
+	enc["enemy_combatants"] = [e0]
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_e_kind_player", before, bad, sigs, base)
+
+	# Combatant data mismatches / forbidden payloads
+	for field_tag in [
+		["current_hp_over", "current_hp", func(d: Dictionary) -> void: d["current_hp"] = int(d.get("max_hp", 1)) + 1],
+		["max_mis", "max_hp", func(d: Dictionary) -> void: d["max_hp"] = int(d.get("max_hp", 1)) + 5],
+		["atk_mis", "attack", func(d: Dictionary) -> void: d["attack"] = 999],
+		["def_mis", "defense", func(d: Dictionary) -> void: d["defense"] = 999],
+		["aff_mis", "affinity", func(d: Dictionary) -> void: d["affinity"] = &"not_real"],
+		["name_mis", "display_name", func(d: Dictionary) -> void: d["display_name"] = "X"],
+		["obj", "display_name", func(d: Dictionary) -> void: d["display_name"] = RefCounted.new()],
+		["callable", "display_name", func(d: Dictionary) -> void: d["display_name"] = Callable()],
+		["extra_key", "extra", func(d: Dictionary) -> void: d["extra"] = 1],
+		["miss_key", "max_hp", func(d: Dictionary) -> void: d.erase("max_hp")],
+	]:
+		var tag_s: String = str(field_tag[0])
+		var mut: Callable = field_tag[2] as Callable
+		enc = (before.get("encounter") as Dictionary).duplicate(true)
+		players = (enc.get("player_combatants") as Array).duplicate(true)
+		p0 = (players[0] as Dictionary).duplicate(true)
+		mut.call(p0)
+		enc["player_combatants"] = [p0]
+		bad = before.duplicate(true)
+		bad["encounter"] = enc
+		_assert_restore_fail("sm_%s" % tag_s, before, bad, sigs, base)
+
+	# Cross-state
+	enc = {"player_combatants": [], "enemy_combatants": [], "active_enemy_index": -1}
+	bad = before.duplicate(true)
+	bad["encounter"] = enc
+	_assert_restore_fail("sm_active_inact_enc", before, bad, sigs, base)
+
+	# inactive runtime + active encounter: clear then try restore active-enc-only shape on inactive
+	var inactive_base: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	# After still active before; build inactive snapshot with non -1 aei is covered by aei_neg1.
+	# inactive Runtime + active encounter via crafting inactive board with active aei:
+	var inactive_snap: Dictionary = before.duplicate(true)
+	inactive_snap["active"] = false
+	inactive_snap["phase"] = &"inactive"
+	inactive_snap["board_cells"] = []
+	enc = (before.get("encounter") as Dictionary).duplicate(true)
+	inactive_snap["encounter"] = enc
+	_assert_restore_fail("sm_inact_rt_act_enc", before, inactive_snap, sigs, base)
+
+	# Changed restore exact (HP only change; board/phase unchanged)
 	var cand: Dictionary = before.duplicate(true)
 	enc = (cand.get("encounter") as Dictionary).duplicate(true)
 	players = (enc.get("player_combatants") as Array).duplicate(true)
 	p0 = (players[0] as Dictionary).duplicate(true)
-	var max_hp: int = int(p0.get("max_hp", 1))
+	var max_hp: int = int(p0.get("max_hp", 2))
 	p0["current_hp"] = max_hp - 1
 	players[0] = p0
 	enc["player_combatants"] = players
 	cand["encounter"] = enc
-	var r_ok: Dictionary = BattleRuntime.restore_runtime_snapshot(cand)
-	_assert_true("sf_changed_ok", bool(r_ok.get("ok", false)))
-	_assert_true("sf_changed_flag", bool(r_ok.get("changed", false)))
-	_assert_eq("sf_changed_hp", BattleRuntime.get_player_combatants()[0].get_current_hp(), max_hp - 1)
-	_assert_eq("sf_changed_en_sig", int(sigs["en"][0]), int(base["en"]) + 1)
-	_assert_eq("sf_changed_rt_sig", int(sigs["rt"][0]), int(base["rt"]) + 1)
+	var base2: Dictionary = _sig_base(sigs)
+	var ok: Dictionary = BattleRuntime.restore_runtime_snapshot(cand)
+	_assert_true("sm_chg_ok", bool(ok.get("ok", false)))
+	_assert_true("sm_chg_flag", bool(ok.get("changed", false)))
+	_assert_true("sm_chg_exact", _runtime_exact_1_1(cand))
+	# Documented restore contract: any successful change emits runtime+board+encounter;
+	# phase_changed only when phase actually changes (HP-only keeps phase).
+	_assert_eq("sm_chg_rt", int(sigs["rt"][0]), int(base2["rt"]) + 1)
+	_assert_eq("sm_chg_en", int(sigs["en"][0]), int(base2["en"]) + 1)
+	_assert_eq("sm_chg_bd", int(sigs["bd"][0]), int(base2["bd"]) + 1)
+	_assert_eq("sm_chg_ph", int(sigs["ph"][0]), int(base2["ph"]))
+	_assert_eq("sm_chg_hp", BattleRuntime.get_player_combatants()[0].get_current_hp(), max_hp - 1)
 
-	# Identical restore
 	var after: Dictionary = BattleRuntime.capture_runtime_snapshot()
-	var base2 := {
-		"rt": int(sigs["rt"][0]),
-		"bd": int(sigs["bd"][0]),
-		"ph": int(sigs["ph"][0]),
-		"en": int(sigs["en"][0]),
-	}
+	var base3: Dictionary = _sig_base(sigs)
 	var idemp: Dictionary = BattleRuntime.restore_runtime_snapshot(after)
-	_assert_true("sf_idemp", bool(idemp.get("ok", false)) and bool(idemp.get("changed", true)) == false)
-	_assert_sig_zero("sf_idemp", sigs, base2)
-
+	_assert_true("sm_idemp", bool(idemp.get("ok", false)) and bool(idemp.get("changed", true)) == false)
+	_assert_sig_zero("sm_idemp", sigs, base3)
 	_disconnect_sigs(sigs)
-	print("[INFO] snapshot failure matrix passed")
+	print("[INFO] snapshot matrix closeout passed")
 
 
-func _run_adventure_enter_transaction_tests() -> void:
-	_clear_catalog_overrides()
-	PlayerData.configure_test_storage_path("user://feibao_tests/enc_enter")
-	PlayerData.reset_runtime_state_for_tests()
-	PlayerData.initialize()
-	_reset_domain()
+func _build_adv_screen() -> Control:
 	_nav().call("reset", &"lobby")
 	_nav().call("navigate_to", &"adventure", true)
 	var packed: PackedScene = load("res://scenes/screens/adventure/adventure_screen.tscn") as PackedScene
 	var adv: Control = packed.instantiate() as Control
 	_tree.root.add_child(adv)
 	adv.call("configure_screen", &"adventure")
-	await _tree.process_frame
-	adv.call("select_area_for_test", &"dev_area_beginner_path")
-	adv.call("select_stage_for_test", &"dev_stage_beginner_01")
-	adv.call("press_prepare_for_test")
-	await _tree.process_frame
-	_assert_true("k_prep", AdventureState.has_prepared_stage())
+	return adv
 
-	# K1 missing stats
-	var stats_loaded: Dictionary = BattleCharacterStatsCatalog.load_default()
-	var arr: Array = []
-	for item in stats_loaded.get("stats", []) as Array:
-		var d: Dictionary = item as Dictionary
-		if str(d.get("character_id", "")) == "feibao_dev":
-			continue
-		arr.append({
-			"character_id": str(d.get("character_id")),
-			"affinity": str(d.get("affinity")),
-			"max_hp": int(d.get("max_hp")),
-			"attack": int(d.get("attack")),
-			"defense": int(d.get("defense")),
-		})
-	var sp := _write_fixture("enter_no_stats.json", JSON.stringify({"schema_version": 1, "catalog_kind": "development_seed", "stats": arr}))
-	BattleCharacterStatsCatalog.set_default_path_override_for_tests(sp)
+
+func _prepare_stage(adv: Control, area: StringName, stage: StringName) -> void:
+	adv.call("select_area_for_test", area)
+	adv.call("select_stage_for_test", stage)
+	adv.call("press_prepare_for_test")
+
+
+func _run_one_enter_failure(tag: String, apply_override: Callable) -> void:
+	PlayerData.configure_test_storage_path("user://feibao_tests/enc_g037_enter")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	_reset_domain()
+	_clear_overrides()
+	var adv: Control = _build_adv_screen()
+	await _tree.process_frame
+	_prepare_stage(adv, &"dev_area_beginner_path", &"dev_stage_beginner_01")
+	await _tree.process_frame
+	_assert_true("%s_prep" % tag, AdventureState.has_prepared_stage())
+	apply_override.call()
 	var rev0: int = PlayerData.get_profile().get_revision()
 	var fp0: Dictionary = _prod_fp()
 	var hist0: int = int(_nav().call("get_history_size"))
+	var rt0: Dictionary = BattleRuntime.capture_runtime_snapshot()
+	var st0: Dictionary = {}
+	if BattleState.has_active_session():
+		st0 = BattleState.capture_session_snapshot()
+	var prep_id: StringName = AdventureState.get_selected_stage_id()
+	var sigs: Dictionary = _connect_sigs()
+	var base: Dictionary = _sig_base(sigs)
 	adv.call("press_enter_battle_for_test")
 	await _tree.process_frame
-	_assert_true("k1_no_session", BattleState.has_active_session() == false)
-	_assert_true("k1_no_rt", BattleRuntime.has_active_runtime() == false)
-	_assert_true("k1_prep_kept", AdventureState.has_prepared_stage())
-	_assert_eq("k1_nav", str(_nav().call("get_current_screen")), "adventure")
-	_assert_eq("k1_hist", int(_nav().call("get_history_size")), hist0)
-	_assert_eq("k1_rev", PlayerData.get_profile().get_revision(), rev0)
-	_assert_true("k1_fp", _fp_eq(fp0, _prod_fp()))
-	_assert_true("k1_enter_enabled", bool(adv.call("is_enter_battle_enabled")))
-
-	# K4 retry after clear override
-	_clear_catalog_overrides()
+	_assert_eq("%s_screen" % tag, str(_nav().call("get_current_screen")), "adventure")
+	_assert_eq("%s_hist" % tag, int(_nav().call("get_history_size")), hist0)
+	_assert_true("%s_no_st" % tag, BattleState.has_active_session() == false)
+	_assert_true("%s_no_rt" % tag, BattleRuntime.has_active_runtime() == false)
+	_assert_true("%s_rt_exact" % tag, _runtime_exact_1_1(rt0))
+	_assert_eq("%s_prep_kept" % tag, str(AdventureState.get_selected_stage_id()), str(prep_id))
+	_assert_true("%s_enter_en" % tag, bool(adv.call("is_enter_battle_enabled")))
+	_assert_eq("%s_rev" % tag, PlayerData.get_profile().get_revision(), rev0)
+	_assert_true("%s_fp" % tag, _fp_eq(fp0, _prod_fp()))
+	_assert_sig_zero(tag, sigs, base)
+	_disconnect_sigs(sigs)
+	_clear_overrides()
 	var hist1: int = int(_nav().call("get_history_size"))
 	adv.call("press_enter_battle_for_test")
 	await _tree.process_frame
 	await _tree.process_frame
-	_assert_true("k4_state", BattleState.has_active_session())
-	_assert_true("k4_rt", BattleRuntime.has_active_runtime())
-	_assert_true("k4_enc", BattleRuntime.has_active_encounter())
-	_assert_eq("k4_cells", BattleRuntime.get_board_cells().size(), 30)
-	_assert_eq("k4_nav", str(_nav().call("get_current_screen")), "battle")
-	_assert_eq("k4_hist_delta", int(_nav().call("get_history_size")), hist1 + 1)
-
-	# K5 double enter while already in battle should not double-create
-	var cells_before: Array[StringName] = BattleRuntime.get_board_cells()
-	var snap_rt: Dictionary = BattleRuntime.capture_runtime_snapshot()
-	adv.call("press_enter_battle_for_test")
-	await _tree.process_frame
-	_assert_true("k5_exact", _runtime_exact_1_1(snap_rt))
-	_assert_eq("k5_cells0", str(cells_before[0]), str(BattleRuntime.get_board_cells()[0]))
-
+	_assert_eq("%s_retry_hist" % tag, int(_nav().call("get_history_size")), hist1 + 1)
+	_assert_true("%s_retry_st" % tag, BattleState.has_active_session())
+	_assert_true("%s_retry_rt" % tag, BattleRuntime.has_active_runtime())
+	_assert_true("%s_retry_enc" % tag, BattleRuntime.has_active_encounter())
+	_assert_eq("%s_retry_cells" % tag, BattleRuntime.get_board_cells().size(), 30)
 	adv.queue_free()
 	await _tree.process_frame
-	print("[INFO] adventure enter transaction tests passed")
+	_reset_domain()
 
 
-func _run_leave_transaction_and_real_turn_tests() -> void:
-	_clear_catalog_overrides()
-	_seed_session(&"dev_stage_beginner_01")
-	_assert_true("lt_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+func _run_adventure_three_failures() -> void:
+	await _run_one_enter_failure(
+		"d1_stats",
+		func() -> void:
+			var arr: Array = []
+			for item in BattleCharacterStatsCatalog.load_default().get("stats", []) as Array:
+				var d: Dictionary = item as Dictionary
+				if str(d.get("character_id", "")) == "feibao_dev":
+					continue
+				arr.append({
+					"character_id": str(d.get("character_id")),
+					"affinity": str(d.get("affinity")),
+					"max_hp": int(d.get("max_hp")),
+					"attack": int(d.get("attack")),
+					"defense": int(d.get("defense")),
+				})
+			var p := _write_fixture("d1_stats.json", JSON.stringify({"schema_version": 1, "catalog_kind": "development_seed", "stats": arr}))
+			BattleCharacterStatsCatalog.set_default_path_override_for_tests(p)
+	)
+	await _run_one_enter_failure(
+		"d2_se",
+		func() -> void:
+			var p := _write_fixture(
+				"d2_se.json",
+				JSON.stringify({
+					"schema_version": 1,
+					"catalog_kind": "development_seed",
+					"encounters": [{"stage_id": "dev_stage_mist_01", "enemy_ids": ["training_sprout"]}],
+				})
+			)
+			StageEncounterCatalog.set_default_path_override_for_tests(p)
+	)
+	await _run_one_enter_failure(
+		"d3_enemy",
+		func() -> void:
+			var p := _write_fixture(
+				"d3_en.json",
+				JSON.stringify({
+					"schema_version": 1,
+					"catalog_kind": "development_seed",
+					"enemies": [
+						{"enemy_id": "training_droplet", "display_name": "訓練水滴", "affinity": "tide", "max_hp": 48, "attack": 9, "defense": 4, "visual_symbol": "○"},
+					],
+				})
+			)
+			EnemyCatalog.set_default_path_override_for_tests(p)
+	)
+	print("[INFO] adventure three failures passed")
 
-	# Real accepted turn via forced board if needed
-	var match_board: Array[StringName] = []
-	# Use runtime test board with horizontal match-ready swap if available
-	var cells: Array[StringName] = BattleRuntime.get_board_cells()
-	_assert_eq("lt_cells", cells.size(), 30)
-	var turn0: int = BattleRuntime.get_turn_count()
-	var php0: int = BattleRuntime.get_player_combatants()[0].get_current_hp()
-	var ehp0: int = BattleRuntime.get_enemy_combatants()[0].get_current_hp()
-	var aei0: int = BattleRuntime.get_active_enemy_index()
 
-	# Try swaps until accepted match or exhaust a few pairs
-	var accepted: bool = false
-	var cleared: int = 0
-	var cascades: int = 0
-	for y in 5:
-		for x in 5:
-			if accepted:
-				break
-			var r: Dictionary = BattleRuntime.try_swap_cells(Vector2i(x, y), Vector2i(x + 1, y))
-			if bool(r.get("ok", false)) and bool(r.get("accepted", false)):
-				accepted = true
-				cleared = int(r.get("cleared_cell_count", 0))
-				cascades = int(r.get("cascade_count", 0))
-				break
-		if accepted:
-			break
-	if not accepted:
-		# Force a known match board via test seam
-		var forced: Array[StringName] = cells.duplicate()
-		# Set row0 to create match on swap - simpler: set three embers then resolve by select
-		# Use begin_from_seed is already done; if no natural swap, still assert HP unchanged after no-match swaps
-		pass
-	_assert_eq("lt_hp_p_after_try", BattleRuntime.get_player_combatants()[0].get_current_hp(), php0)
-	_assert_eq("lt_hp_e_after_try", BattleRuntime.get_enemy_combatants()[0].get_current_hp(), ehp0)
-	_assert_eq("lt_aei_after_try", BattleRuntime.get_active_enemy_index(), aei0)
-	if accepted:
-		_assert_true("lt_turn_inc", BattleRuntime.get_turn_count() == turn0 + 1)
-		_assert_true("lt_cleared_pos", cleared >= 3)
-		_assert_true("lt_cascade_pos", cascades >= 1)
+func _run_double_enter_leave() -> void:
+	# Same-frame double enter
+	PlayerData.configure_test_storage_path("user://feibao_tests/enc_g037_dbl")
+	PlayerData.reset_runtime_state_for_tests()
+	PlayerData.initialize()
+	_reset_domain()
+	_clear_overrides()
+	var adv: Control = _build_adv_screen()
+	await _tree.process_frame
+	_prepare_stage(adv, &"dev_area_beginner_path", &"dev_stage_beginner_01")
+	await _tree.process_frame
+	var hist0: int = int(_nav().call("get_history_size"))
+	var sigs: Dictionary = _connect_sigs()
+	var base: Dictionary = _sig_base(sigs)
+	adv.call("press_enter_battle_for_test")
+	adv.call("press_enter_battle_for_test")
+	await _tree.process_frame
+	await _tree.process_frame
+	_assert_eq("de_hist", int(_nav().call("get_history_size")), hist0 + 1)
+	_assert_eq("de_rt", int(sigs["rt"][0]), int(base["rt"]) + 1)
+	_assert_eq("de_bd", int(sigs["bd"][0]), int(base["bd"]) + 1)
+	_assert_eq("de_en", int(sigs["en"][0]), int(base["en"]) + 1)
+	_assert_true("de_active", BattleRuntime.has_active_runtime() and BattleRuntime.has_active_encounter())
+	_disconnect_sigs(sigs)
+	adv.queue_free()
+	await _tree.process_frame
 
-	# Distinct HP via snapshot restore for leave evidence
+	# Same-frame double leave after forced turn + marked HP
+	_seed_solo(&"dev_stage_beginner_01")
+	_assert_true("dl_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+	_assert_true("dl_set", BattleRuntime.set_board_cells_for_tests(_match_ready_board()))
+	var sw: Dictionary = BattleRuntime.try_swap_cells(Vector2i(2, 0), Vector2i(3, 0))
+	_assert_true("dl_turn", bool(sw.get("ok", false)) and bool(sw.get("accepted", false)))
 	var snap: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	var enc: Dictionary = (snap.get("encounter") as Dictionary).duplicate(true)
 	var players: Array = (enc.get("player_combatants") as Array).duplicate(true)
@@ -752,7 +939,7 @@ func _run_leave_transaction_and_real_turn_tests() -> void:
 	players[0] = p0
 	enc["player_combatants"] = players
 	snap["encounter"] = enc
-	_assert_true("lt_hp_set", bool(BattleRuntime.restore_runtime_snapshot(snap).get("ok", false)))
+	_assert_true("dl_mark", bool(BattleRuntime.restore_runtime_snapshot(snap).get("ok", false)))
 	var marked: Dictionary = BattleRuntime.capture_runtime_snapshot()
 	var marked_hp: int = BattleRuntime.get_player_combatants()[0].get_current_hp()
 
@@ -762,120 +949,311 @@ func _run_leave_transaction_and_real_turn_tests() -> void:
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
 	_nav().call("navigate_to", &"battle", true)
+	var leave_n: Array = [0]
+	var back_n: Array = [0]
+	screen.leave_requested.connect(func() -> void: leave_n[0] = int(leave_n[0]) + 1)
+	screen.back_requested.connect(func() -> void: back_n[0] = int(back_n[0]) + 1)
 	screen.call("set_leave_nav_result_override_for_tests", false)
-	var leave_fail: bool = bool(screen.call("request_leave"))
-	_assert_true("lt_leave_fail", leave_fail == false)
-	_assert_true("lt_restored", _runtime_exact_1_1(marked))
-	_assert_eq("lt_hp_exact", BattleRuntime.get_player_combatants()[0].get_current_hp(), marked_hp)
-	_assert_true("lt_state", BattleState.has_active_session())
-	_assert_true("lt_controls", bool(screen.call("get_leave_button").disabled) == false)
-
+	var fail: bool = bool(screen.call("request_leave"))
+	_assert_true("dl_fail", fail == false)
+	_assert_true("dl_exact", _runtime_exact_1_1(marked))
+	_assert_eq("dl_hp", BattleRuntime.get_player_combatants()[0].get_current_hp(), marked_hp)
+	_assert_true("dl_controls", screen.call("get_leave_button").disabled == false)
 	screen.call("clear_leave_nav_result_override_for_tests")
-	var ok_leave: bool = bool(screen.call("request_leave"))
-	_assert_true("lt_retry", ok_leave)
-	_assert_true("lt_cleared_rt", BattleRuntime.has_active_runtime() == false)
-	_assert_true("lt_cleared_st", BattleState.has_active_session() == false)
-
+	var hist_l0: int = int(_nav().call("get_history_size"))
+	var leave_n0: int = int(leave_n[0])
+	var back_n0: int = int(back_n[0])
+	var ok1: bool = bool(screen.call("request_leave"))
+	var ok2: bool = bool(screen.call("request_leave"))
+	await _tree.process_frame
+	_assert_true("dl_ok1", ok1)
+	_assert_true("dl_ok2_block", ok2 == false)
+	_assert_eq("dl_leave_sig", int(leave_n[0]), leave_n0 + 1)
+	_assert_eq("dl_back_sig", int(back_n[0]), back_n0 + 1)
+	# go_back_or_fallback reduces history by exactly one transition.
+	_assert_eq("dl_hist_delta", int(_nav().call("get_history_size")), hist_l0 - 1)
+	_assert_true("dl_st_off", BattleState.has_active_session() == false)
+	_assert_true("dl_rt_off", BattleRuntime.has_active_runtime() == false)
+	_assert_true("dl_enc_off", BattleRuntime.has_active_encounter() == false)
+	_assert_eq("dl_aei_inact", BattleRuntime.get_active_enemy_index(), -1)
 	screen.queue_free()
 	await _tree.process_frame
-	print("[INFO] leave + real turn tests passed")
+	print("[INFO] double enter/leave passed")
 
 
-func _run_screen_exact_and_responsive_tests() -> void:
-	_clear_catalog_overrides()
-	_seed_session(&"dev_stage_beginner_02")
-	_assert_true("ui_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
-	var players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
-	var enemies: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
-	_assert_eq("ui_p_count", players.size(), 1)
-	_assert_eq("ui_e_count", enemies.size(), 2)
-	_assert_eq("ui_e0_id", str(enemies[0].get_source_id()), "training_sprout")
-	_assert_eq("ui_e1_id", str(enemies[1].get_source_id()), "training_droplet")
+func _run_max_content_cards_and_subviewport() -> void:
+	_seed_party3_session(&"dev_stage_mist_03")
+	_assert_true("mc_begin", bool(BattleRuntime.begin_from_battle_session().get("ok", false)))
+	_assert_eq("mc_players", BattleRuntime.get_player_combatants().size(), 3)
+	_assert_eq("mc_enemies", BattleRuntime.get_enemy_combatants().size(), 3)
+	_assert_eq("mc_e0", str(BattleRuntime.get_enemy_combatants()[0].get_source_id()), "training_sprout")
+	_assert_eq("mc_e1", str(BattleRuntime.get_enemy_combatants()[1].get_source_id()), "training_droplet")
+	_assert_eq("mc_e2", str(BattleRuntime.get_enemy_combatants()[2].get_source_id()), "training_emberling")
 
 	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
 	var screen: Control = packed.instantiate() as Control
 	_tree.root.add_child(screen)
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.call("configure_screen", &"battle")
+	for _i in 4:
+		await _tree.process_frame
+
+	var pcards: Array = screen.call("get_party_cards_for_tests") as Array
+	var ecards: Array = screen.call("get_enemy_cards_for_tests") as Array
+	_assert_eq("mc_pc", pcards.size(), 3)
+	_assert_eq("mc_ec", ecards.size(), 3)
+	var players: Array[BattleCombatantModel] = BattleRuntime.get_player_combatants()
+	for i in 3:
+		var card: Control = pcards[i] as Control
+		var title: String = str(screen.call("get_card_title_for_tests", card))
+		_assert_true("mc_ptitle_%d" % i, title.find(players[i].get_display_name()) >= 0)
+		if i == 0:
+			_assert_true("mc_leader", title.find("領隊") >= 0)
+		else:
+			_assert_true("mc_noleader_%d" % i, title.find("領隊") < 0)
+		var aff_expect: String = "%s %s" % [BattleAffinity.symbol(players[i].get_affinity()), BattleAffinity.display_name(players[i].get_affinity())]
+		_assert_eq("mc_paff_%d" % i, str(screen.call("get_card_affinity_for_tests", card)), aff_expect)
+		_assert_eq(
+			"mc_php_%d" % i,
+			str(screen.call("get_card_hp_label_for_tests", card)),
+			"HP %d/%d" % [players[i].get_current_hp(), players[i].get_max_hp()]
+		)
+		_assert_eq(
+			"mc_pstats_%d" % i,
+			str(screen.call("get_card_stats_for_tests", card)),
+			"ATK %d · DEF %d" % [players[i].get_attack(), players[i].get_defense()]
+		)
+		var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", card) as ProgressBar
+		_assert_true("mc_pbar_%d" % i, bar != null)
+		_assert_eq("mc_pbar_min_%d" % i, int(bar.min_value), 0)
+		_assert_eq("mc_pbar_max_%d" % i, int(bar.max_value), players[i].get_max_hp())
+		_assert_eq("mc_pbar_val_%d" % i, int(bar.value), players[i].get_current_hp())
+		_assert_eq("mc_pbar_focus_%d" % i, bar.focus_mode, Control.FOCUS_NONE)
+		_assert_eq("mc_card_focus_%d" % i, card.focus_mode, Control.FOCUS_NONE)
+		_assert_eq("mc_card_mouse_%d" % i, card.mouse_filter, Control.MOUSE_FILTER_IGNORE)
+
+	var enemies: Array[BattleCombatantModel] = BattleRuntime.get_enemy_combatants()
+	for i in 3:
+		var card: Control = ecards[i] as Control
+		var title: String = str(screen.call("get_card_title_for_tests", card))
+		_assert_true("mc_ename_%d" % i, title.find(enemies[i].get_display_name()) >= 0)
+		var vis: String = str((EnemyCatalog.find_enemy(enemies[i].get_source_id()).get("enemy", {}) as Dictionary).get("visual_symbol", ""))
+		_assert_true("mc_evis_%d" % i, title.find(vis) >= 0)
+		if i == 0:
+			_assert_true("mc_active", title.find("作用中") >= 0)
+		else:
+			_assert_true("mc_inactive_%d" % i, title.find("作用中") < 0)
+		_assert_eq(
+			"mc_ehp_%d" % i,
+			str(screen.call("get_card_hp_label_for_tests", card)),
+			"HP %d/%d" % [enemies[i].get_current_hp(), enemies[i].get_max_hp()]
+		)
+
+	# Summary labels hidden
+	var pl: Label = screen.get_node_or_null("%PartyListLabel") as Label
+	var el: Label = screen.get_node_or_null("%EnemyListLabel") as Label
+	_assert_true("mc_plist_hidden", pl != null and pl.visible == false)
+	_assert_true("mc_elist_hidden", el != null and el.visible == false)
+	_assert_true("mc_cache_party", str(screen.call("get_party_list_text")).find("HP") >= 0)
+
 	screen.call("configure_screen", &"battle")
 	await _tree.process_frame
-	await _tree.process_frame
+	_assert_eq("mc_cfg_pc", (screen.call("get_party_cards_for_tests") as Array).size(), 3)
+	_assert_eq("mc_cfg_ec", (screen.call("get_enemy_cards_for_tests") as Array).size(), 3)
 
-	var party_text: String = str(screen.call("get_party_list_text"))
-	_assert_true("ui_p_name", party_text.find(players[0].get_display_name()) >= 0)
-	_assert_true("ui_p_hp", party_text.find("%d/%d" % [players[0].get_current_hp(), players[0].get_max_hp()]) >= 0 or party_text.find("HP %d / %d" % [players[0].get_current_hp(), players[0].get_max_hp()]) >= 0 or party_text.find("HP %d/%d" % [players[0].get_current_hp(), players[0].get_max_hp()]) >= 0)
-	_assert_true("ui_p_leader", party_text.find("領隊") >= 0)
-	_assert_true("ui_p_atk", party_text.find("ATK %d" % players[0].get_attack()) >= 0)
-	_assert_true("ui_p_def", party_text.find("DEF %d" % players[0].get_defense()) >= 0)
-	_assert_true("ui_p_aff", party_text.find(BattleAffinity.symbol(players[0].get_affinity())) >= 0)
+	# SubViewport matrix
+	await _run_subviewport_case(360, 640, true)
+	await _run_subviewport_case(390, 844, false)
+	await _run_subviewport_case(720, 1280, false)
 
-	var enemy_text: String = str(screen.call("get_enemy_list_text"))
-	_assert_true("ui_e0_name", enemy_text.find(enemies[0].get_display_name()) >= 0)
-	_assert_true("ui_e1_name", enemy_text.find(enemies[1].get_display_name()) >= 0)
-	_assert_true("ui_e_active", enemy_text.find("作用中") >= 0)
-	_assert_true("ui_e0_hp", enemy_text.find("%d/%d" % [enemies[0].get_current_hp(), enemies[0].get_max_hp()]) >= 0 or enemy_text.find("HP %d/%d" % [enemies[0].get_current_hp(), enemies[0].get_max_hp()]) >= 0)
-	_assert_true("ui_shell_exact", str(screen.call("get_shell_status_text")).find("傷害與敵人行動尚未啟用") >= 0)
-
-	# Cards: ProgressBars exist
-	var party_cards: Node = screen.get_node_or_null("%PartyCards")
-	var enemy_cards: Node = screen.get_node_or_null("%EnemyCards")
-	_assert_true("ui_pcards", party_cards != null and party_cards.get_child_count() == 1)
-	_assert_true("ui_ecards", enemy_cards != null and enemy_cards.get_child_count() == 2)
-	if party_cards != null and party_cards.get_child_count() > 0:
-		var bars: Array = []
-		_collect_bars(party_cards.get_child(0), bars)
-		_assert_true("ui_pbar", bars.size() >= 1)
-		if bars.size() > 0:
-			var bar: ProgressBar = bars[0] as ProgressBar
-			_assert_true("ui_pbar_h", bar.get_combined_minimum_size().y >= 16.0 or bar.size.y >= 16.0 or bar.custom_minimum_size.y >= 16.0)
-			_assert_eq("ui_pbar_focus", bar.focus_mode, Control.FOCUS_NONE)
-
-	# Repeated configure no duplicate cards
-	screen.call("configure_screen", &"battle")
-	await _tree.process_frame
-	_assert_eq("ui_cfg_pcards", party_cards.get_child_count() if party_cards != null else -1, 1)
-	_assert_eq("ui_cfg_ecards", enemy_cards.get_child_count() if enemy_cards != null else -1, 2)
-
-	# Responsive 360
-	var sv: Window = _tree.root as Window
-	var old_size: Vector2i = sv.size
-	sv.size = Vector2i(360, 640)
-	await _tree.process_frame
-	await _tree.process_frame
-	var scroll: ScrollContainer = screen.call("get_body_scroll") as ScrollContainer
-	_assert_true("r360_scroll", scroll != null)
-	if scroll != null:
-		var range_v: float = scroll.get_v_scroll_bar().max_value
-		_assert_true("r360_range", range_v > 0.5)
-	var grid: GridContainer = screen.call("get_board_grid") as GridContainer
-	if grid != null and grid.get_child_count() > 0:
-		var cell: Control = grid.get_child(0) as Control
-		_assert_true("r360_cell_w", cell.size.x >= 48.0 or cell.get_combined_minimum_size().x >= 48.0)
-		_assert_true("r360_cell_h", cell.size.y >= 48.0 or cell.get_combined_minimum_size().y >= 48.0)
-
-	sv.size = Vector2i(390, 844)
-	await _tree.process_frame
-	await _tree.process_frame
-	if grid != null and grid.get_child_count() > 0:
-		var cell2: Control = grid.get_child(0) as Control
-		_assert_true("r390_cell", cell2.size.x >= 48.0 or cell2.get_combined_minimum_size().x >= 48.0)
-
-	sv.size = Vector2i(720, 1280)
-	await _tree.process_frame
-	await _tree.process_frame
-	if grid != null and grid.get_child_count() > 0:
-		var cell3: Control = grid.get_child(0) as Control
-		_assert_true("r720_cell", cell3.size.x >= 48.0 or cell3.get_combined_minimum_size().x >= 48.0)
-
-	sv.size = old_size
 	screen.queue_free()
 	await _tree.process_frame
-	print("[INFO] screen exact + responsive tests passed")
+	print("[INFO] max content cards + subviewport passed")
 
 
-func _collect_bars(n: Node, out: Array) -> void:
-	if n is ProgressBar:
-		out.append(n)
-	for c in n.get_children():
-		_collect_bars(c, out)
+func _run_subviewport_case(w: int, h: int, require_scroll: bool) -> void:
+	var tag := "%dx%d" % [w, h]
+	var vp := SubViewport.new()
+	vp.size = Vector2i(w, h)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_tree.root.add_child(vp)
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.size = Vector2(w, h)
+	vp.add_child(host)
+	var packed: PackedScene = load("res://scenes/screens/battle/battle_screen.tscn") as PackedScene
+	var screen: Control = packed.instantiate() as Control
+	host.add_child(screen)
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.size = Vector2(w, h)
+	screen.call("configure_screen", &"battle")
+	for _i in 6:
+		await _tree.process_frame
+
+	var grid: GridContainer = screen.call("get_board_grid") as GridContainer
+	_assert_true("%s_grid" % tag, grid != null)
+	_assert_eq("%s_cells" % tag, grid.get_child_count(), 30)
+	for i in grid.get_child_count():
+		var cell: Control = grid.get_child(i) as Control
+		_assert_true("%s_cw_%d" % [tag, i], cell.size.x >= 48.0)
+		_assert_true("%s_ch_%d" % [tag, i], cell.size.y >= 48.0)
+
+	var pcards: Array = screen.call("get_party_cards_for_tests") as Array
+	var ecards: Array = screen.call("get_enemy_cards_for_tests") as Array
+	_assert_eq("%s_pc" % tag, pcards.size(), 3)
+	_assert_eq("%s_ec" % tag, ecards.size(), 3)
+	for card in pcards:
+		var bar: ProgressBar = screen.call("get_card_progress_bar_for_tests", card) as ProgressBar
+		_assert_true("%s_pbar" % tag, bar != null)
+		# Force layout size evaluation
+		bar.reset_size()
+		await _tree.process_frame
+		_assert_true("%s_pbar_h" % tag, bar.size.y >= 16.0)
+	for card in ecards:
+		var bar2: ProgressBar = screen.call("get_card_progress_bar_for_tests", card) as ProgressBar
+		_assert_true("%s_ebar" % tag, bar2 != null)
+		bar2.reset_size()
+		await _tree.process_frame
+		_assert_true("%s_ebar_h" % tag, bar2.size.y >= 16.0)
+
+	var back: Button = screen.call("get_back_button") as Button
+	var leave: Button = screen.call("get_leave_button") as Button
+	_assert_true("%s_back_h" % tag, back.size.y >= 48.0)
+	_assert_true("%s_leave_h" % tag, leave.size.y >= 48.0)
+
+	var scroll: ScrollContainer = screen.call("get_body_scroll") as ScrollContainer
+	_assert_true("%s_scroll" % tag, scroll != null)
+	var range_v: float = 0.0
+	var content_h: float = 0.0
+	var page_h: float = float(h)
+	if scroll != null and scroll.get_v_scroll_bar() != null:
+		var vb: ScrollBar = scroll.get_v_scroll_bar()
+		range_v = maxf(0.0, float(vb.max_value) - float(vb.page))
+		page_h = float(vb.page)
+	if scroll != null and scroll.get_child_count() > 0:
+		var content: Control = scroll.get_child(0) as Control
+		content_h = content.size.y
+	print(
+		"[INFO] subvp_%s range=%.1f content_h=%.1f page_h=%.1f"
+		% [tag, range_v, content_h, page_h]
+	)
+	if require_scroll:
+		_assert_true("%s_range" % tag, range_v > 0.5)
+	elif w == 390:
+		if content_h > page_h + 0.5:
+			_assert_true("%s_range_scroll" % tag, range_v > 0.5)
+		else:
+			_assert_true("%s_range_fit" % tag, range_v <= 0.5)
+	elif w == 720:
+		# Compact multi-column cards should keep page within one screenful.
+		_assert_true("%s_range_fit720" % tag, range_v <= 0.5)
+
+	var vp_rect := Rect2(Vector2.ZERO, Vector2(w, h))
+	var targets: Array = [
+		ecards[0], ecards[2], pcards[0], pcards[2], grid.get_child(0), grid.get_child(29), leave
+	]
+	for t in targets:
+		var ctrl: Control = t as Control
+		# Leave lives in fixed header — skip scroll ensure; still require full viewport containment.
+		if ctrl != leave:
+			screen.call("ensure_control_visible_for_test", ctrl)
+		for _j in 3:
+			await _tree.process_frame
+		var gr: Rect2 = ctrl.get_global_rect()
+		var host_origin: Vector2 = host.get_global_rect().position
+		var local := Rect2(gr.position - host_origin, gr.size)
+		_assert_true("%s_reach" % tag, _rect_fully_within(local, vp_rect, 2.0))
+
+	# Cards never focusable / never focus owner.
+	for card in pcards:
+		_assert_eq("%s_pcard_focusmode" % tag, (card as Control).focus_mode, Control.FOCUS_NONE)
+		_assert_true("%s_pcard_nofocus" % tag, (card as Control).has_focus() == false)
+	for card in ecards:
+		_assert_eq("%s_ecard_focusmode" % tag, (card as Control).focus_mode, Control.FOCUS_NONE)
+		_assert_true("%s_ecard_nofocus" % tag, (card as Control).has_focus() == false)
+
+	# Real keyboard path only on 360 (max-content scroll surface).
+	if w == 360:
+		await _run_keyboard_max_content(vp, screen, pcards, ecards)
+
+	vp.queue_free()
+	await _tree.process_frame
+
+
+func _send_ui_action(sv: SubViewport, action: String) -> void:
+	var press := InputEventAction.new()
+	press.action = action
+	press.pressed = true
+	sv.push_input(press)
+	var release := InputEventAction.new()
+	release.action = action
+	release.pressed = false
+	sv.push_input(release)
+
+
+func _send_key(sv: SubViewport, keycode: Key) -> void:
+	var press := InputEventKey.new()
+	press.keycode = keycode
+	press.physical_keycode = keycode
+	press.pressed = true
+	sv.push_input(press)
+	var release := InputEventKey.new()
+	release.keycode = keycode
+	release.physical_keycode = keycode
+	release.pressed = false
+	sv.push_input(release)
+
+
+func _run_keyboard_max_content(sv: SubViewport, screen: Control, pcards: Array, ecards: Array) -> void:
+	var c00: Button = screen.call("get_cell_button", 0, 0) as Button
+	var c10: Button = screen.call("get_cell_button", 1, 0) as Button
+	var c01: Button = screen.call("get_cell_button", 0, 1) as Button
+	var c11: Button = screen.call("get_cell_button", 1, 1) as Button
+	var back: Button = screen.call("get_back_button") as Button
+	var leave: Button = screen.call("get_leave_button") as Button
+	_assert_true("kb_cells", c00 != null and c10 != null and c01 != null and c11 != null)
+	c00.grab_focus()
+	await _tree.process_frame
+	_assert_true("kb_focus0", sv.gui_get_focus_owner() == c00)
+	_send_ui_action(sv, "ui_right")
+	await _tree.process_frame
+	_assert_true("kb_right", sv.gui_get_focus_owner() == c10)
+	_send_ui_action(sv, "ui_down")
+	await _tree.process_frame
+	_assert_true("kb_down", sv.gui_get_focus_owner() == c11)
+	_send_ui_action(sv, "ui_left")
+	await _tree.process_frame
+	_assert_true("kb_left", sv.gui_get_focus_owner() == c01)
+	_send_ui_action(sv, "ui_up")
+	await _tree.process_frame
+	_assert_true("kb_up", sv.gui_get_focus_owner() == c00)
+	# ENTER / SPACE activate cell (selection), not domain mutation helpers.
+	_send_key(sv, KEY_ENTER)
+	await _tree.process_frame
+	_assert_true("kb_enter_sel", BattleRuntime.has_selection())
+	_send_key(sv, KEY_SPACE)
+	await _tree.process_frame
+	# Top cell ui_up → Back
+	c00.grab_focus()
+	await _tree.process_frame
+	_send_ui_action(sv, "ui_up")
+	await _tree.process_frame
+	_assert_true("kb_escape_back", sv.gui_get_focus_owner() == back)
+	# Bottom cell ui_down → Leave
+	var c54: Button = screen.call("get_cell_button", 5, 4) as Button
+	c54.grab_focus()
+	await _tree.process_frame
+	_send_ui_action(sv, "ui_down")
+	await _tree.process_frame
+	_assert_true("kb_escape_leave", sv.gui_get_focus_owner() == leave)
+	_assert_true("kb_no_trap", leave.has_focus() and leave.visible and not leave.disabled)
+	for card in pcards:
+		_assert_true("kb_pcard_never_owner", sv.gui_get_focus_owner() != card)
+	for card in ecards:
+		_assert_true("kb_ecard_never_owner", sv.gui_get_focus_owner() != card)
+	# Focus style exists on board cells.
+	var sb: StyleBox = c00.get_theme_stylebox("focus")
+	_assert_true("kb_focus_style", sb != null)
 
 
 func _assert_true(name: String, cond: bool) -> void:
