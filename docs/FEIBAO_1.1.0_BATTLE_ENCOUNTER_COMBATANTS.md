@@ -64,10 +64,31 @@ Snapshot key `encounter`: `{ player_combatants, enemy_combatants, active_enemy_i
 
 ## BattleScreen
 
-- Enemy cards: visual_symbol, name, affinity, HP, bar, active badge (index 0)
-- Player cards: name, affinity, HP, bar, ATK/DEF, leader badge (index 0)
+- **Cards are the sole visible combatant content** (party/enemy header + cards)
+- `PartyListLabel` / `EnemyListLabel` are hidden (zero layout height); summary text is cached for non-visual getters
+- Enemy cards: visual_symbol, name, affinity text+symbol, HP (`HP %d/%d`), bar, active badge (index 0)
+- Player cards: name, affinity text+symbol, HP, bar, ATK/DEF, leader badge (index 0)
+- ProgressBar: min 0, max = max_hp, value = current_hp, actual height ≥ 16, non-focusable
+- Wide layouts (≥700px): party/enemy cards may render multi-column to keep 720×1280 within one page
 - Notice: 「戰鬥單位狀態已建立；傷害與敵人行動尚未啟用。」
-- Board turns do not change HP or active enemy index
+- Board turns do **not** change HP or active enemy index (no damage / attack / victory / defeat events)
+
+## Verification evidence (GROK-037)
+
+Honest test methods used by `tests/battle_encounter_combatant_smoke_test.gd`:
+
+| Area | Method |
+|------|--------|
+| Forced accepted turn | Deterministic match-ready fixture via `set_board_cells_for_tests` + exact `try_swap_cells(2,0)/(3,0)`; no natural swap search; unconditional accepted assertions |
+| Adventure enter failures | Real `AdventureScreen` prepare → override catalog → `press_enter_battle_for_test` → state/runtime/revision/fingerprint exact + signal delta 0 → clear override → same screen retry success |
+| Same-frame double enter | Two enter presses before await; transition +1; runtime/board/encounter signals +1 each |
+| Same-frame double leave | Nav-failure restore (marked non-full HP) then two leave presses same frame; signals +1; feature guard blocks second |
+| Snapshot matrix | Illegal encounter container/counts/identity/slots/kind/combatant/cross-state restore fail-closed; valid changed restore exact + documented signal contract |
+| Responsive | Independent SubViewport per size (360×640, 390×844, 720×1280); actual cell/bar sizes; `_rect_fully_within` (not intersects); scroll range = max−page |
+| Keyboard | Real `InputEventAction` / `InputEventKey` via SubViewport `push_input` on max content (3 party + 3 enemies); cards never focus owners |
+| Production safety | SHA-256 fingerprints of `user://feibao/player_profile.json` (+tmp/+bak) unchanged across suite; overrides cleared; fixtures under `user://feibao_tests/` only |
+
+Not used as evidence: best-effort swap search, conditional `if accepted`, unit-only enter paths as Adventure transaction proof, custom minimum size as actual rect proof, same BodyScroll as scroll reachability.
 
 ## Exclusions
 

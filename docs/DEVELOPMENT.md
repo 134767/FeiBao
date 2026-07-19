@@ -95,7 +95,9 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - Catalog fields use whole-JSON-number validation (10 / 10.0 ok; 10.5 / bool / string / null rejected)
 - Atomic board+encounter begin; snapshot includes `encounter` (TYPE_INT combatant fields)
 - Test-only catalog path overrides under `user://feibao_tests/` or `res://tests/fixtures/`
-- BattleScreen party/enemy HP lines + ProgressBars; no damage or victory
+- BattleScreen: card-only visible combatants (cached summary getters); multi-column cards on wide viewports
+- Evidence suite: forced match-ready turn, Adventure three failure paths, same-frame double enter/leave, SubViewport 360/390/720 matrix
+- No damage or victory; board turns leave HP / active enemy unchanged
 - See `docs/FEIBAO_1.1.0_BATTLE_ENCOUNTER_COMBATANTS.md`
 
 ## Git Branch & PR Rules
