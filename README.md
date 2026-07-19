@@ -2,7 +2,7 @@
 
 Mobile-first, portrait-first Godot 4.x project (clean-room).
 
-**Current version: 0.9.0** — battle session shell foundation.
+**Current version: 1.0.0** — battle board & turn-loop foundation.
 
 ## Requirements
 
@@ -22,18 +22,21 @@ godot --path .
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-## What 0.9.0 Adds
+## What 1.0.0 Adds
 
-- Memory-only BattleState session (stage + party snapshot, no disk)
-- Dedicated BattleScreen shell (not a lobby module)
-- Adventure two-step: prepare stage, then enter battle (transactional leave/enter)
+- Operable **6×5** match board with deterministic seed/RNG
+- Memory-only **BattleRuntime** (board, turns, selection, resolution events)
+- Swap → match → clear → gravity → refill → cascade turn loop
+- Adventure enter creates BattleState **and** BattleRuntime (transactional)
+- Battle leave clears both with exact rollback on nav failure
 - PlayerProfile schema remains **2**; StageCatalog schema remains **1**
-- No real combat / completion persistence
+- No enemies / damage / win-loss / rewards / board persistence
 
 ## Docs
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT.md`
+- `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
 - `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`
 - `docs/FEIBAO_0.8.0_ADVENTURE_STAGE_SELECTION.md`
 - `docs/FEIBAO_0.7.0_ACTIVE_PARTY.md`
@@ -43,4 +46,4 @@ godot --headless --path . --script res://tests/test_runner.gd
 
 ## Explicit Exclusions
 
-No cloud accounts, encryption claims, auto-login, combat stats, marketplace assets, or APK-derived content.
+No cloud accounts, encryption claims, auto-login, finished combat systems, marketplace assets, or APK-derived content.

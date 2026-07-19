@@ -4,7 +4,7 @@
 
 - **Engine:** Godot **4.7.1** Standard (not mono / .NET)
 - **Renderer:** Mobile
-- **App version:** **0.9.0**
+- **App version:** **1.0.0**
 - **Language:** GDScript
 - **CLI:** `C:\Godot\godot.exe`
 
@@ -80,6 +80,14 @@ Expect exit code `0`. Flow: Bootstrap → GameShell → Boot (PlayerData.initial
 - BattleState memory-only; BattleScreen shell (no real combat)
 - Adventure: prepare stage, then enter battle (separate CTA, transactional nav)
 - See `docs/FEIBAO_0.9.0_BATTLE_SESSION_SHELL.md`
+
+## Battle Board & Turn Loop (1.0.0)
+
+- BattleRuntime + pure board engine; 6×5 deterministic match board
+- Full session binding (area/stage/party/leader); canonical inactive snapshot
+- Global RNG isolation + forced hard-cap fixture + keyboard/responsive rect evidence
+- Enter creates state + runtime; leave clears both with dual rollback
+- See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`
 
 ## Git Branch & PR Rules
 

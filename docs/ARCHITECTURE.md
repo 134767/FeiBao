@@ -3,9 +3,9 @@
 ## Project Goal
 
 FeiBao is a mobile-first, portrait-first Godot 4.x application.
-**Current version: 0.9.0** — battle session shell foundation.
+**Current version: 1.0.0** — battle board & turn-loop foundation.
 
-Does **not** claim production multiplayer, combat, or cloud systems.
+Does **not** claim production multiplayer, finished combat, or cloud systems.
 
 ## Version History
 
@@ -19,7 +19,8 @@ Does **not** claim production multiplayer, combat, or cloud systems.
 | 0.6.0 | Ownership + representative wired into character catalog UI |
 | 0.7.0 | Active party formation + profile schema 2 + lazy schema 1 migration |
 | 0.8.0 | Adventure stage selection + StageCatalog + AdventureState preparation |
-| **0.9.0 (current)** | Battle session shell + BattleScreen (no real combat) |
+| 0.9.0 | Battle session shell + BattleScreen (no real combat) |
+| **1.0.0 (current)** | 6×5 board, BattleRuntime, deterministic turn resolution |
 
 ## Clean-room Principles
 
@@ -48,10 +49,21 @@ Bootstrap → GameShell → Boot (PlayerData.initialize)
   → Login (prefill name; manual submit) → Lobby
   ⇄ ModuleScreen (inventory, farm, settings)
   ⇄ AdventureScreen (area/stage selection + preparation)
-  ⇄ BattleScreen (session shell; not a lobby module)
+  ⇄ BattleScreen (board + turn loop; not a lobby module)
   ⇄ CharacterScreen (catalog + ownership / representative)
   ⇄ PartyScreen (active party 1–3, leader ≠ representative)
 ```
+
+## Battle Board & Turn Loop (1.0.0)
+
+- BattleState = session shell; BattleRuntime = board / RNG / turns / events (memory-only).
+- Runtime **full session binding**: area + stage + party order + leader.
+- Pure domain: `BattleBoardModel`, `BattleBoardEngine`, resolution event dictionaries.
+- Deterministic seed from session fields; no global RNG / time seed; hard-cap cascade rollback.
+- Enter creates state + runtime; leave clears both with dual-snapshot rollback.
+- No enemies, damage, win/loss, rewards, or board persistence.
+
+See `docs/FEIBAO_1.0.0_BATTLE_BOARD_TURN_LOOP.md`.
 
 ## Battle Session Shell (0.9.0)
 
