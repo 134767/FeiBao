@@ -233,14 +233,18 @@ static func _validate_player_damage(d: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "calculated_damage must be >= 1"}
 	if actual < 0:
 		return {"ok": false, "error": "actual_damage negative"}
-	if hp_before < 0 or hp_after < 0:
+	if hp_before < 1:
+		return {"ok": false, "error": "player_damage requires hp_before > 0"}
+	if hp_after < 0:
 		return {"ok": false, "error": "hp negative"}
 	if hp_after > hp_before:
 		return {"ok": false, "error": "hp_after > hp_before"}
 	if actual != hp_before - hp_after:
 		return {"ok": false, "error": "actual_damage != hp_before - hp_after"}
-	if actual > calc:
-		return {"ok": false, "error": "actual_damage > calculated_damage"}
+	# Must apply exact min(calculated, hp_before) — no under-damage.
+	var expected_actual: int = mini(calc, hp_before)
+	if actual != expected_actual:
+		return {"ok": false, "error": "actual_damage != min(calculated_damage, hp_before)"}
 	return {"ok": true, "error": ""}
 
 
@@ -281,6 +285,9 @@ static func _validate_player_combat_completed(d: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "target_hp_after > target_hp_before"}
 	if defeated != (hp_after == 0):
 		return {"ok": false, "error": "target_defeated mismatch"}
+	# Summary total must equal HP delta for all cases.
+	if total_damage != hp_before - hp_after:
+		return {"ok": false, "error": "total_damage != target_hp_before - target_hp_after"}
 	return {"ok": true, "error": ""}
 
 
@@ -317,20 +324,31 @@ static func _validate_sequence(events: Array) -> Dictionary:
 		damage_count += 1
 	if damage_count > 3:
 		return {"ok": false, "error": "more than 3 player_damage events"}
-	if (last.get("attack_count") as int) != damage_count:
+	var sum_attack: int = last.get("attack_count") as int
+	var sum_total: int = last.get("total_damage") as int
+	var sum_before: int = last.get("target_hp_before") as int
+	var sum_after: int = last.get("target_hp_after") as int
+	if sum_attack != damage_count:
 		return {"ok": false, "error": "summary attack_count mismatch"}
-	if (last.get("total_damage") as int) != total_actual:
+	if sum_total != total_actual:
 		return {"ok": false, "error": "summary total_damage mismatch"}
+	if sum_total != sum_before - sum_after:
+		return {"ok": false, "error": "summary total_damage != HP delta"}
 	if damage_count == 0:
-		if (last.get("target_hp_before") as int) != (last.get("target_hp_after") as int):
-			# Zero-attack summary may keep HP unchanged (including already 0).
-			pass
-		if (last.get("total_damage") as int) != 0:
+		if sum_total != 0:
 			return {"ok": false, "error": "zero attack total_damage must be 0"}
+		if sum_before != sum_after:
+			return {"ok": false, "error": "zero attack requires target_hp_before == target_hp_after"}
+		if bool(last.get("target_defeated")) != (sum_after == 0):
+			return {"ok": false, "error": "zero attack target_defeated mismatch"}
 	else:
-		if chain_hp != (last.get("target_hp_after") as int):
+		if sum_before <= sum_after:
+			return {"ok": false, "error": "attack sequence requires HP decrease"}
+		if sum_total < 1:
+			return {"ok": false, "error": "attack sequence total_damage must be > 0"}
+		if chain_hp != sum_after:
 			return {"ok": false, "error": "summary target_hp_after != chain end"}
-		if first_hp_before != (last.get("target_hp_before") as int):
+		if first_hp_before != sum_before:
 			return {"ok": false, "error": "summary target_hp_before mismatch"}
 	return {"ok": true, "error": ""}
 

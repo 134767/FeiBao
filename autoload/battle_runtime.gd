@@ -596,7 +596,7 @@ func _validate_inactive_canonical(
 	return ""
 
 
-## Cross-check combat events against board events, encounter, party, and turn.
+## Cross-check combat events by full re-simulation matching BattleDamageResolver.
 func _validate_combat_snapshot_binding(
 	combat_events: Array,
 	board_events: Array,
@@ -628,45 +628,130 @@ func _validate_combat_snapshot_binding(
 		return "combat target_id != active enemy"
 	if (summary.get("target_hp_after") as int) != active.get_current_hp():
 		return "combat target_hp_after != active enemy current_hp"
-	# Aggregate board orbs and verify damage cleared counts + party order attackers.
+
+	var expected: Dictionary = _simulate_expected_combat_events(
+		board_events, enc, party, turn_count, summary.get("target_hp_before") as int
+	)
+	if not bool(expected.get("ok", false)):
+		return str(expected.get("error", "combat simulation failed"))
+	var exp_events: Array = expected.get("events", []) as Array
+	if not BattleCombatEvent.events_equal(exp_events, combat_events):
+		return "combat events != full expected attack simulation"
+	if (expected.get("final_hp", -1) as int) != active.get_current_hp():
+		return "simulated final HP != encounter active enemy current_hp"
+	return ""
+
+
+## Pure re-simulation of player turn damage (identical rules to BattleDamageResolver).
+func _simulate_expected_combat_events(
+	board_events: Array,
+	enc: BattleEncounterModel,
+	party: Array[StringName],
+	turn_count: int,
+	summary_hp_before: int
+) -> Dictionary:
+	var fail: Dictionary = {"ok": false, "error": "", "events": [], "final_hp": 0}
 	var agg: Dictionary = BattleDamageResolver.aggregate_affinity_counts_for_tests(board_events)
 	if not bool(agg.get("ok", false)):
-		return "board orb aggregate failed: %s" % str(agg.get("error", ""))
+		fail["error"] = "board orb aggregate failed: %s" % str(agg.get("error", ""))
+		return fail
 	var counts: Dictionary = agg.get("counts", {}) as Dictionary
 	var players: Array[BattleCombatantModel] = enc.get_player_combatants()
 	if players.size() != party.size():
-		return "party size mismatch for combat binding"
-	var party_index: Dictionary = {}
+		fail["error"] = "party size mismatch for combat binding"
+		return fail
 	for i in party.size():
-		party_index[str(party[i])] = i
-	var last_party_idx: int = -1
-	for i in combat_events.size() - 1:
-		var d: Dictionary = combat_events[i] as Dictionary
-		var aid: StringName = d.get("attacker_id") as StringName
-		if not party_index.has(str(aid)):
-			return "attacker not in party"
-		var pidx: int = int(party_index[str(aid)])
-		if pidx <= last_party_idx:
-			return "attacker order not party order"
-		last_party_idx = pidx
-		var p: BattleCombatantModel = players[pidx]
-		if p.get_source_id() != aid:
-			return "attacker id party mismatch"
-		if (d.get("affinity") as StringName) != p.get_affinity():
-			return "attacker affinity mismatch"
-		if (d.get("attacker_attack") as int) != p.get_attack():
-			return "attacker attack mismatch"
-		if (d.get("target_defense") as int) != active.get_defense():
-			return "target defense mismatch"
-		var cleared: int = d.get("cleared_orb_count") as int
-		var expected_cleared: int = int(counts.get(p.get_affinity(), 0))
-		if cleared != expected_cleared:
-			return "cleared_orb_count not derivable from board"
-		var scaled: int = int(floor(float(p.get_attack() * cleared) / 3.0))
-		var expected_calc: int = maxi(1, scaled - active.get_defense())
-		if (d.get("calculated_damage") as int) != expected_calc:
-			return "calculated_damage formula mismatch"
-	return ""
+		if players[i].get_source_id() != party[i]:
+			fail["error"] = "party order mismatch for combat binding"
+			return fail
+	var active: BattleCombatantModel = enc.get_active_enemy()
+	if active == null:
+		fail["error"] = "active enemy missing"
+		return fail
+	var target_id: StringName = active.get_source_id()
+	var target_defense: int = active.get_defense()
+	if typeof(summary_hp_before) != TYPE_INT or summary_hp_before < 0:
+		fail["error"] = "invalid summary target_hp_before"
+		return fail
+	var sim_hp: int = summary_hp_before
+	var damage_events: Array = []
+	# Target already 0: only zero-attack summary is legal.
+	if sim_hp <= 0:
+		var zsum: Dictionary = BattleCombatEvent.make_player_combat_completed(
+			turn_count, 0, 0, target_id, 0, 0, true
+		)
+		var zv: Dictionary = BattleCombatEvent.validate_events([zsum])
+		if not bool(zv.get("ok", false)):
+			fail["error"] = "zero-hp summary invalid: %s" % str(zv.get("error", ""))
+			return fail
+		return {
+			"ok": true,
+			"error": "",
+			"events": zv.get("events", []) as Array,
+			"final_hp": 0,
+		}
+	for p in players:
+		if sim_hp <= 0:
+			break
+		var aff: StringName = p.get_affinity()
+		var cleared: int = int(counts.get(aff, 0))
+		if cleared < 3:
+			continue
+		var atk: int = p.get_attack()
+		var scaled: int = int(floor(float(atk * cleared) / 3.0))
+		var calculated: int = maxi(1, scaled - target_defense)
+		var actual: int = mini(calculated, sim_hp)
+		var hp_before: int = sim_hp
+		var hp_after: int = hp_before - actual
+		var dmg_ev: Dictionary = BattleCombatEvent.make_player_damage(
+			turn_count,
+			p.get_source_id(),
+			target_id,
+			aff,
+			cleared,
+			atk,
+			target_defense,
+			calculated,
+			actual,
+			hp_before,
+			hp_after
+		)
+		damage_events.append(dmg_ev)
+		sim_hp = hp_after
+	var total_damage: int = summary_hp_before - sim_hp
+	var attack_count: int = damage_events.size()
+	# Zero attack only when no eligible living-target affinity match.
+	if attack_count == 0:
+		# Confirm legitimacy: no player with cleared >= 3 while target was alive at start.
+		var any_eligible: bool = false
+		for p2 in players:
+			if int(counts.get(p2.get_affinity(), 0)) >= 3:
+				any_eligible = true
+				break
+		if any_eligible and summary_hp_before > 0:
+			fail["error"] = "matching affinity exists but zero damage events"
+			return fail
+	var summary: Dictionary = BattleCombatEvent.make_player_combat_completed(
+		turn_count,
+		attack_count,
+		total_damage,
+		target_id,
+		summary_hp_before,
+		sim_hp,
+		sim_hp == 0
+	)
+	var all_ev: Array = damage_events.duplicate()
+	all_ev.append(summary)
+	var v: Dictionary = BattleCombatEvent.validate_events(all_ev)
+	if not bool(v.get("ok", false)):
+		fail["error"] = "expected combat validation failed: %s" % str(v.get("error", ""))
+		return fail
+	return {
+		"ok": true,
+		"error": "",
+		"events": v.get("events", []) as Array,
+		"final_hp": sim_hp,
+	}
 
 
 ## Select / deselect / retarget / attempt swap via cell press.
